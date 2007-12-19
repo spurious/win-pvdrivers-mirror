@@ -75,10 +75,10 @@ static BOOLEAN AutoEnumerate;
 static LIST_ENTRY ShutdownMsgList;
 
 typedef struct {
-  LIST_ENTRY Entry;
+  LIST_ENTRY ListEntry;
   ULONG Ptr;
 //  ULONG Len;
-  UCHAR Buf[0];
+  CHAR Buf[0];
 } SHUTDOWN_MSG_ENTRY, *PSHUTDOWN_MSG_ENTRY;
 
 static KSPIN_LOCK ShutdownMsgLock;
@@ -373,7 +373,7 @@ XenPCI_AddDevice(
 
   WdfDeviceSetBusInformationForChildren(Device, &busInfo);
 
-  WDF_INTERRUPT_CONFIG_INIT(&InterruptConfig, EvtChn_Interrupt, NULL);
+  WDF_INTERRUPT_CONFIG_INIT(&InterruptConfig, EvtChn_Interrupt, EvtChn_InterruptDpc);
   InterruptConfig.EvtInterruptEnable = XenPCI_InterruptEnable;
   InterruptConfig.EvtInterruptDisable = XenPCI_InterruptDisable;
   Status = WdfInterruptCreate(Device, &InterruptConfig, WDF_NO_OBJECT_ATTRIBUTES, &xpdd->XenInterrupt);
@@ -653,10 +653,11 @@ XenPCI_IoRead(WDFQUEUE Queue, WDFREQUEST Request, size_t Length)
   ULONG Remaining;
   ULONG CopyLen;
   PCHAR Buffer;
-  ULONG BufLen;
+  size_t BufLen;
   KIRQL OldIrql;
 
   UNREFERENCED_PARAMETER(Queue);
+  UNREFERENCED_PARAMETER(Length);
 
   KdPrint((__DRIVER_NAME " --> IoRead\n"));
 
@@ -687,7 +688,7 @@ XenPCI_IoRead(WDFQUEUE Queue, WDFREQUEST Request, size_t Length)
   {    
     KdPrint((__DRIVER_NAME "     More to do...\n"));
     Entry->Ptr += CopyLen;
-    InsertHeadList(&ShutdownMsgList, Entry);
+    InsertHeadList(&ShutdownMsgList, &Entry->ListEntry);
   }
 
   KeReleaseSpinLock(&ShutdownMsgLock, OldIrql);
@@ -942,10 +943,6 @@ XenBus_ShutdownHandler(char *Path, PVOID Data)
   char *Value;
   xenbus_transaction_t xbt;
   int retry;
-  WDFREQUEST Request;
-  PCHAR Buffer;
-  size_t BufLen;
-  PCHAR Ptr;
   PSHUTDOWN_MSG_ENTRY Entry;
 
   UNREFERENCED_PARAMETER(Path);
@@ -976,7 +973,7 @@ XenBus_ShutdownHandler(char *Path, PVOID Data)
     Entry = (PSHUTDOWN_MSG_ENTRY)ExAllocatePoolWithTag(NonPagedPool, sizeof(SHUTDOWN_MSG_ENTRY) + strlen(Value) + 1 + 1, XENPCI_POOL_TAG);
     Entry->Ptr = 0;
     RtlStringCbPrintfA(Entry->Buf, sizeof(SHUTDOWN_MSG_ENTRY) + strlen(Value) + 1 + 1, "%s\n", Value);
-    InsertTailList(&ShutdownMsgList, Entry);
+    InsertTailList(&ShutdownMsgList, &Entry->ListEntry);
     WdfIoQueueStart(ReadQueue);
   }
   KdPrint((__DRIVER_NAME " <-- XenBus_ShutdownHandler\n"));
