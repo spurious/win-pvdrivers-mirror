@@ -139,7 +139,6 @@ XenVbd_HwScsiInterruptTarget(PVOID DeviceExtension)
   PXENVBD_TARGET_DATA TargetData = (PXENVBD_TARGET_DATA)DeviceExtension;
   PSCSI_REQUEST_BLOCK Srb;
   RING_IDX i, rp;
-  int j;
   blkif_response_t *rep;
   int BlockCount;
   PXENVBD_DEVICE_DATA DeviceData = (PXENVBD_DEVICE_DATA)TargetData->DeviceData;
@@ -155,8 +154,22 @@ XenVbd_HwScsiInterruptTarget(PVOID DeviceExtension)
     {
       rep = XenVbd_GetResponse(TargetData, i);
 
-//KdPrint((__DRIVER_NAME "     rep = %p\n", rep));
-//KdPrint((__DRIVER_NAME "     rep->id = %d\n", rep->id));
+      //KdPrint((__DRIVER_NAME "     rep = %p\n", rep));
+      //KdPrint((__DRIVER_NAME "     rep->id = %d\n", rep->id));
+
+      /*
+       * This code is to automatically detect if the backend is using the same
+       * bit width or a different bit width to us. Later versions of Xen do this
+       * via a xenstore value, but not all. That 0x0fffffff (notice
+       * that the msb is not actually set, so we don't have any problems with
+       * sign extending) is to signify the last entry on the right, which is
+       * different under 32 and 64 bits, and that is why we set it up there.
+
+       * To do the detection, we put two initial entries on the ring, with an op
+       * of 0xff (which is invalid). The first entry is mostly okay, but the
+       * second will be grossly misaligned if the backend bit width is different,
+       * and we detect this and switch frontend structures.
+       */
       switch (TargetData->ring_detect_state)
       {
       case 0:
@@ -833,9 +846,8 @@ XenVbd_PutSrbOnRing(PXENVBD_TARGET_DATA TargetData, PSCSI_REQUEST_BLOCK Srb)
   //PUCHAR DataBuffer;
   int i;
   int BlockCount;
-  PXENVBD_DEVICE_DATA DeviceData = (PXENVBD_DEVICE_DATA)TargetData->DeviceData;
   blkif_shadow_t *shadow;
-  int id;
+  uint64_t id;
 
 // can use SRB_STATUS_BUSY to push the SRB back to windows...
 
