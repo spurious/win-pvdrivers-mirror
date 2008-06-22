@@ -25,7 +25,10 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 #include <ntddk.h>
 
-#ifndef __MINGW32__
+#ifdef __MINGW32__
+#define KeMemoryBarrier() asm("mfence;")
+#else
+#define DDKAPI
 #include <wdm.h>
 //#include <wdf.h>
 #include <initguid.h>
@@ -247,7 +250,11 @@ typedef struct
   PXENPCI_PDO_DEVICE_DATA context;
 } XEN_CHILD, *PXEN_CHILD;
 
+#ifdef __GNUC__
+#define SWINT(x) case x: asm ("int x"); break;
+#else
 #define SWINT(x) case x: __asm { int x } break;
+#endif
 
 #if defined(_X86_)
 static __inline VOID
@@ -306,9 +313,6 @@ sw_interrupt(UCHAR intno)
   
 #include "hypercall.h"
 
-typedef unsigned long xenbus_transaction_t;
-typedef uint32_t XENSTORE_RING_IDX;
-
 #define XBT_NIL ((xenbus_transaction_t)0)
 
 static __inline VOID
@@ -316,6 +320,11 @@ XenPci_FreeMem(PVOID Ptr)
 {
   ExFreePoolWithTag(Ptr, XENPCI_POOL_TAG);
 }
+
+NTSTATUS
+hvm_get_stubs(PXENPCI_DEVICE_DATA xpdd);
+NTSTATUS
+hvm_free_stubs(PXENPCI_DEVICE_DATA xpdd);
 
 NTSTATUS
 XenPci_Power_Fdo(PDEVICE_OBJECT device_object, PIRP irp);
