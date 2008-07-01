@@ -98,10 +98,13 @@ EvtChn_DpcBounce(PRKDPC Dpc, PVOID Context, PVOID SystemArgument1, PVOID SystemA
   UNREFERENCED_PARAMETER(SystemArgument1);
   UNREFERENCED_PARAMETER(SystemArgument2);
 
+  //KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
+
   if (action->type == EVT_ACTION_TYPE_IRQ)
     sw_interrupt((UCHAR)action->vector);
   else
     action->ServiceRoutine(NULL, action->ServiceContext);
+  //KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
 }
 
 static DDKAPI BOOLEAN
@@ -172,6 +175,7 @@ EvtChn_Bind(PVOID Context, evtchn_port_t Port, PKSERVICE_ROUTINE ServiceRoutine,
 
   xpdd->ev_actions[Port].ServiceRoutine = ServiceRoutine;
   xpdd->ev_actions[Port].ServiceContext = ServiceContext;
+  xpdd->ev_actions[Port].xpdd = xpdd;
   KeMemoryBarrier();
   xpdd->ev_actions[Port].type = EVT_ACTION_TYPE_NORMAL;
 
@@ -198,6 +202,7 @@ EvtChn_BindDpc(PVOID Context, evtchn_port_t Port, PKSERVICE_ROUTINE ServiceRouti
 
   xpdd->ev_actions[Port].ServiceRoutine = ServiceRoutine;
   xpdd->ev_actions[Port].ServiceContext = ServiceContext;
+  xpdd->ev_actions[Port].xpdd = xpdd;
   KeInitializeDpc(&xpdd->ev_actions[Port].Dpc, EvtChn_DpcBounce, &xpdd->ev_actions[Port]);
   KeMemoryBarrier(); // make sure that the new service routine is only called once the context is set up
   xpdd->ev_actions[Port].type = EVT_ACTION_TYPE_DPC;
@@ -225,6 +230,7 @@ EvtChn_BindIrq(PVOID Context, evtchn_port_t Port, ULONG vector)
 
   KeInitializeDpc(&xpdd->ev_actions[Port].Dpc, EvtChn_DpcBounce, &xpdd->ev_actions[Port]);
   xpdd->ev_actions[Port].vector = vector;
+  xpdd->ev_actions[Port].xpdd = xpdd;
   KeMemoryBarrier();
   xpdd->ev_actions[Port].type = EVT_ACTION_TYPE_IRQ;
 
@@ -293,10 +299,9 @@ EvtChn_AllocUnbound(PVOID Context, domid_t Domain)
   return op.port;
 }
 
-NTSTATUS
-EvtChn_Init(PXENPCI_DEVICE_DATA xpdd)
+static VOID
+EvtChn_Connect(PXENPCI_DEVICE_DATA xpdd)
 {
-  NTSTATUS status;
   int i;
 
   KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
@@ -320,25 +325,6 @@ EvtChn_Init(PXENPCI_DEVICE_DATA xpdd)
     xpdd->shared_info_area->vcpu_info[i].evtchn_upcall_mask = 1;
   }
 
-  status = IoConnectInterrupt(
-    &xpdd->interrupt,
-	EvtChn_Interrupt,
-	xpdd,
-	NULL,
-	xpdd->irq_vector,
-	xpdd->irq_level,
-	xpdd->irq_level,
-	LevelSensitive,
-	TRUE, /* this is a bit of a hack to make xenvbd work */
-	xpdd->irq_affinity,
-	FALSE);
-  
-  if (!NT_SUCCESS(status))
-  {
-    KdPrint((__DRIVER_NAME "     IoConnectInterrupt failed 0x%08x\n", status));
-    return status;
-  }
-
   hvm_set_parameter(xpdd, HVM_PARAM_CALLBACK_IRQ, xpdd->irq_number);
 
   for (i = 0; i < MAX_VIRT_CPUS; i++)
@@ -346,15 +332,41 @@ EvtChn_Init(PXENPCI_DEVICE_DATA xpdd)
     xpdd->shared_info_area->vcpu_info[i].evtchn_upcall_mask = 0;
   }
   
-  KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
+  KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
+}
 
+NTSTATUS
+EvtChn_Init(PXENPCI_DEVICE_DATA xpdd)
+{
+  NTSTATUS status;
+  
+  EvtChn_Connect(xpdd);
+  
+  status = IoConnectInterrupt(
+    &xpdd->interrupt,
+  	EvtChn_Interrupt,
+  	xpdd,
+  	NULL,
+  	xpdd->irq_vector,
+  	xpdd->irq_level,
+  	xpdd->irq_level,
+  	LevelSensitive,
+  	TRUE,
+  	xpdd->irq_affinity,
+  	FALSE);
+  
+  if (!NT_SUCCESS(status))
+  {
+    KdPrint((__DRIVER_NAME "     IoConnectInterrupt failed 0x%08x\n", status));
+    return status;
+  }
   return status;
 }
 
 NTSTATUS
 EvtChn_Shutdown(PXENPCI_DEVICE_DATA xpdd)
 {
-  UNREFERENCED_PARAMETER(xpdd);
+  IoDisconnectInterrupt(xpdd->interrupt);
 
   return STATUS_SUCCESS;
 }

@@ -41,7 +41,7 @@ static int allocate_xenbus_id(PXENPCI_DEVICE_DATA xpdd)
   static int probe;
   int o_probe;
 
-//  KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
+  //KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
 
   for (;;)
   {
@@ -68,7 +68,7 @@ static int allocate_xenbus_id(PXENPCI_DEVICE_DATA xpdd)
   //init_waitqueue_head(&req_info[o_probe].waitq);
   KeInitializeEvent(&xpdd->req_info[o_probe].WaitEvent, SynchronizationEvent, FALSE);
 
-//  KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
+  //KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
 
   return o_probe;
 }
@@ -136,7 +136,7 @@ static void xb_write(
   struct xsd_sockmsg m = {type, req_id, trans_id };
   struct write_req header_req = { &m, sizeof(m) };
 
-//  KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
+  //KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
 
   for (r = 0; r < nr_reqs; r++)
     len += (size_t)req[r].len;
@@ -201,7 +201,7 @@ static void xb_write(
   /* Send evtchn to notify remote */
   EvtChn_Notify(xpdd, xpdd->xen_store_evtchn);
 
-//  KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
+  //KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
 }
 
 static struct xsd_sockmsg *
@@ -214,7 +214,7 @@ xenbus_msg_reply(
 {
   int id;
 
-//  KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
+  //KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
 
   id = allocate_xenbus_id(xpdd);
 
@@ -224,7 +224,7 @@ xenbus_msg_reply(
 
   release_xenbus_id(xpdd, id);
 
-//  KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
+  //KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
 
   return xpdd->req_info[id].Reply;
 }
@@ -242,7 +242,7 @@ XenBus_Read(
   char *res;
   char *msg;
 
-//  KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
+  //KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
 
   ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
 
@@ -258,7 +258,7 @@ XenBus_Read(
   ExFreePoolWithTag(rep, XENPCI_POOL_TAG);
   *value = res;
 
-//  KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
+  //KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
 
   return NULL;
 }
@@ -280,7 +280,7 @@ XenBus_Write(
   struct xsd_sockmsg *rep;
   char *msg;
 
-//  KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
+  //KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
 
   ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
 
@@ -290,16 +290,28 @@ XenBus_Write(
     return msg;
   ExFreePoolWithTag(rep, XENPCI_POOL_TAG);
 
-//  KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
+  //KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
 
   return NULL;
+}
+
+static VOID
+XenBus_Connect(PXENPCI_DEVICE_DATA xpdd)
+{
+  PHYSICAL_ADDRESS pa_xen_store_interface;
+  xen_ulong_t xen_store_mfn;
+
+  xpdd->xen_store_evtchn = (evtchn_port_t)hvm_get_parameter(xpdd, HVM_PARAM_STORE_EVTCHN);
+  xen_store_mfn = (xen_ulong_t)hvm_get_parameter(xpdd, HVM_PARAM_STORE_PFN);
+  pa_xen_store_interface.QuadPart = (ULONGLONG)xen_store_mfn << PAGE_SHIFT;
+  xpdd->xen_store_interface = MmMapIoSpace(pa_xen_store_interface, PAGE_SIZE, MmNonCached);
+
+  EvtChn_BindDpc(xpdd, xpdd->xen_store_evtchn, XenBus_Interrupt, xpdd);
 }
 
 NTSTATUS
 XenBus_Init(PXENPCI_DEVICE_DATA xpdd)
 {
-  PHYSICAL_ADDRESS pa_xen_store_interface;
-  xen_ulong_t xen_store_mfn;
   NTSTATUS Status;
   int i;
     
@@ -308,12 +320,6 @@ XenBus_Init(PXENPCI_DEVICE_DATA xpdd)
   ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
 
   KeInitializeSpinLock(&xpdd->WatchLock);
-
-  xpdd->xen_store_evtchn = (evtchn_port_t)hvm_get_parameter(xpdd, HVM_PARAM_STORE_EVTCHN);
-
-  xen_store_mfn = (xen_ulong_t)hvm_get_parameter(xpdd, HVM_PARAM_STORE_PFN);
-  pa_xen_store_interface.QuadPart = (ULONGLONG)xen_store_mfn << PAGE_SHIFT;
-  xpdd->xen_store_interface = MmMapIoSpace(pa_xen_store_interface, PAGE_SIZE, MmNonCached);
 
   for (i = 0; i < MAX_WATCH_ENTRIES; i++)
   {
@@ -340,8 +346,8 @@ XenBus_Init(PXENPCI_DEVICE_DATA xpdd)
     return STATUS_UNSUCCESSFUL;
   }
 
-  EvtChn_BindDpc(xpdd, xpdd->xen_store_evtchn, XenBus_Interrupt, xpdd);
-
+  XenBus_Connect(xpdd);
+  
 //  KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
 
   return STATUS_SUCCESS;
@@ -592,14 +598,25 @@ XenBus_SendAddWatch(
   return msg;
 }
 
+/* called at PASSIVE_LEVEL */
 VOID
 XenBus_Resume(PXENPCI_DEVICE_DATA xpdd)
 {
   int i;
+
+  KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
+
+  XenBus_Connect(xpdd);
   
   for (i = 0; i < MAX_WATCH_ENTRIES; i++)
+  {
     if (xpdd->XenBus_WatchEntries[i].Active)
+    {
+      KdPrint((__DRIVER_NAME "     Adding watch for path = %s\n", xpdd->XenBus_WatchEntries[i].Path));
       XenBus_SendAddWatch(xpdd, XBT_NIL, xpdd->XenBus_WatchEntries[i].Path, i);
+    }
+  }
+  KdPrint((__DRIVER_NAME " <-- XenBus_AddWatch\n"));
 }
 
 char *
@@ -651,11 +668,11 @@ XenBus_AddWatch(
   if (msg)
   {
     xpdd->XenBus_WatchEntries[i].Active = 0;
-    KdPrint((__DRIVER_NAME " <-- XenBus_AddWatch (%s)\n", msg));
+    //KdPrint((__DRIVER_NAME " <-- XenBus_AddWatch (%s)\n", msg));
     return msg;
   }
 
-  KdPrint((__DRIVER_NAME " <-- XenBus_AddWatch\n"));
+  //KdPrint((__DRIVER_NAME " <-- XenBus_AddWatch\n"));
 
   return NULL;
 }

@@ -134,31 +134,30 @@ XenPci_Init(PXENPCI_DEVICE_DATA xpdd)
 {
   struct xen_add_to_physmap xatp;
   int ret;
-  PHYSICAL_ADDRESS shared_info_area_unmapped;
 
   KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
 
   hvm_get_stubs(xpdd);
 
-  shared_info_area_unmapped = XenPci_AllocMMIO(xpdd, PAGE_SIZE);
-  KdPrint((__DRIVER_NAME " shared_info_area_unmapped.QuadPart = %lx\n", shared_info_area_unmapped.QuadPart));
+  if (!xpdd->shared_info_area_unmapped.QuadPart)
+  {
+    xpdd->shared_info_area_unmapped = XenPci_AllocMMIO(xpdd, PAGE_SIZE);
+    xpdd->shared_info_area = MmMapIoSpace(xpdd->shared_info_area_unmapped,
+      PAGE_SIZE, MmNonCached);
+  }
+  KdPrint((__DRIVER_NAME " shared_info_area_unmapped.QuadPart = %lx\n", xpdd->shared_info_area_unmapped.QuadPart));
   xatp.domid = DOMID_SELF;
   xatp.idx = 0;
   xatp.space = XENMAPSPACE_shared_info;
-  xatp.gpfn = (xen_pfn_t)(shared_info_area_unmapped.QuadPart >> PAGE_SHIFT);
+  xatp.gpfn = (xen_pfn_t)(xpdd->shared_info_area_unmapped.QuadPart >> PAGE_SHIFT);
   KdPrint((__DRIVER_NAME " gpfn = %d\n", xatp.gpfn));
   ret = HYPERVISOR_memory_op(xpdd, XENMEM_add_to_physmap, &xatp);
   KdPrint((__DRIVER_NAME " hypervisor memory op ret = %d\n", ret));
-  xpdd->shared_info_area = MmMapIoSpace(shared_info_area_unmapped,
-    PAGE_SIZE, MmNonCached);
+
   KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
 
   return STATUS_SUCCESS;
 }
-
-#if 0
-WDFQUEUE ReadQueue;
-#endif
 
 static NTSTATUS
 XenPci_Pnp_IoCompletion(PDEVICE_OBJECT device_object, PIRP irp, PVOID context)
@@ -304,11 +303,37 @@ XenBus_ShutdownIoCancel(PDEVICE_OBJECT device_object, PIRP irp)
   KdPrint((__DRIVER_NAME " <-- " __FUNCTION__"\n"));
 }
 
+static VOID
+XenPci_CompleteResume(PDEVICE_OBJECT device_object, PVOID context)
+{
+  PXENPCI_DEVICE_DATA xpdd;
+  PXEN_CHILD child;
+
+  UNREFERENCED_PARAMETER(context);
+  KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
+
+  xpdd = (PXENPCI_DEVICE_DATA)device_object->DeviceExtension;
+
+  XenBus_Resume(xpdd);
+
+  for (child = (PXEN_CHILD)xpdd->child_list.Flink; child != (PXEN_CHILD)&xpdd->child_list; child = (PXEN_CHILD)child->entry.Flink)
+  {
+    XenPci_Resume(child->context->common.pdo);
+    child->context->device_state.resume_state = RESUME_STATE_FRONTEND_RESUME;
+    // how can we signal children that they are ready to restart again?
+  }
+
+  xpdd->suspending = 0;
+
+  KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
+}
+
 struct {
-  ULONG do_spin;
-  ULONG nr_spinning;
+  volatile ULONG do_spin;
+  volatile LONG nr_spinning;
 } typedef SUSPEND_INFO, *PSUSPEND_INFO;
 
+/* Called at DISPATCH_LEVEL */
 static DDKAPI VOID
 XenPci_Suspend(
   PRKDPC Dpc,
@@ -319,9 +344,11 @@ XenPci_Suspend(
   PXENPCI_DEVICE_DATA xpdd = Context;
   PSUSPEND_INFO suspend_info = SystemArgument1;
   ULONG ActiveProcessorCount;
-  KIRQL OldIrql;
+  KIRQL old_irql;
   int cancelled;
-  int i;
+  PIO_WORKITEM work_item;
+  PXEN_CHILD child;
+  //PUCHAR gnttbl_backup[PAGE_SIZE * NR_GRANT_FRAMES];
 
   UNREFERENCED_PARAMETER(Dpc);
   UNREFERENCED_PARAMETER(SystemArgument2);
@@ -330,34 +357,55 @@ XenPci_Suspend(
 
   if (KeGetCurrentProcessorNumber() != 0)
   {
+    KeRaiseIrql(HIGH_LEVEL, &old_irql);
     KdPrint((__DRIVER_NAME "     spinning...\n"));
-    InterlockedIncrement((volatile LONG *)&suspend_info->nr_spinning);
+    InterlockedIncrement(&suspend_info->nr_spinning);
     KeMemoryBarrier();
     while(suspend_info->do_spin)
     {
       /* we should be able to wait more nicely than this... */
     }
     KeMemoryBarrier();
-    InterlockedDecrement((volatile LONG *)&suspend_info->nr_spinning);    
+    InterlockedDecrement(&suspend_info->nr_spinning);    
     KdPrint((__DRIVER_NAME "     ...done spinning\n"));
     KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n", KeGetCurrentProcessorNumber()));
+    KeLowerIrql(old_irql);
     return;
   }
   ActiveProcessorCount = (ULONG)KeNumberProcessors;
 
+  KeRaiseIrql(HIGH_LEVEL, &old_irql);
+  
   KdPrint((__DRIVER_NAME "     waiting for all other processors to spin\n"));
-  while (suspend_info->nr_spinning < ActiveProcessorCount - 1)
+  while (suspend_info->nr_spinning < (LONG)ActiveProcessorCount - 1)
   {
       /* we should be able to wait more nicely than this... */
   }
   KdPrint((__DRIVER_NAME "     all other processors are spinning\n"));
 
-  KeRaiseIrql(HIGH_LEVEL, &OldIrql);
+  // make a backup of the grant table - we are going to keep it instead of throwing it away
+  //memcpy(gnttbl_backup, xpdd->gnttab_table, PAGE_SIZE * NR_GRANT_FRAMES);
+
   KdPrint((__DRIVER_NAME "     calling suspend\n"));
   cancelled = hvm_shutdown(Context, SHUTDOWN_suspend);
   KdPrint((__DRIVER_NAME "     back from suspend, cancelled = %d\n", cancelled));
-  KeLowerIrql(OldIrql);
 
+  XenPci_Init(xpdd);
+  
+  GntTbl_Map(Context, 0, NR_GRANT_FRAMES - 1);
+
+  /* this enabled interrupts again too */  
+  EvtChn_Init(xpdd);
+
+  //memcpy(xpdd->gnttab_table, gnttbl_backup, PAGE_SIZE * NR_GRANT_FRAMES);
+
+  for (child = (PXEN_CHILD)xpdd->child_list.Flink; child != (PXEN_CHILD)&xpdd->child_list; child = (PXEN_CHILD)child->entry.Flink)
+  {
+    child->context->device_state.resume_state = RESUME_STATE_BACKEND_RESUME;
+  }
+
+  KeLowerIrql(old_irql);
+  
   KdPrint((__DRIVER_NAME "     waiting for all other processors to stop spinning\n"));
   suspend_info->do_spin = 0;
   while (suspend_info->nr_spinning != 0)
@@ -366,19 +414,13 @@ XenPci_Suspend(
   }
   KdPrint((__DRIVER_NAME "     all other processors have stopped spinning\n"));
 
-  for (i = 0; i < MAX_VIRT_CPUS; i++)
-  {
-    xpdd->shared_info_area->vcpu_info[i].evtchn_upcall_mask = 1;
-  }
-
-  GntTbl_Map(Context, 0, NR_GRANT_FRAMES - 1);
-  XenBus_Resume(xpdd);
-  // TODO: Enable xenbus
-  // TODO: Enable all our devices  
-
-  KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n", KeGetCurrentProcessorNumber()));
+	work_item = IoAllocateWorkItem(xpdd->common.fdo);
+	IoQueueWorkItem(work_item, XenPci_CompleteResume, DelayedWorkQueue, NULL);
+  
+  KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
 }
 
+/* Called at PASSIVE_LEVEL */
 static VOID
 XenPci_BeginSuspend(PXENPCI_DEVICE_DATA xpdd)
 {
@@ -398,13 +440,16 @@ XenPci_BeginSuspend(PXENPCI_DEVICE_DATA xpdd)
     suspend_info->do_spin = 1;
     RtlZeroMemory(suspend_info, sizeof(SUSPEND_INFO));
 
-    // TODO: Disable all our devices  
-    // TODO: Disable xenbus
+    // I think we need to synchronise with the interrupt here...
 
     for (i = 0; i < MAX_VIRT_CPUS; i++)
     {
       xpdd->shared_info_area->vcpu_info[i].evtchn_upcall_mask = 1;
     }
+    KeMemoryBarrier();
+    EvtChn_Shutdown(xpdd);
+    KeFlushQueuedDpcs();
+
     //ActiveProcessorCount = KeQueryActiveProcessorCount(&ActiveProcessorMask); // this is for Vista+
     ActiveProcessorCount = (ULONG)KeNumberProcessors;
     KeRaiseIrql(DISPATCH_LEVEL, &OldIrql);
@@ -529,11 +574,11 @@ XenPci_DeviceWatchHandler(char *path, PVOID context)
   char *value;
   PXENPCI_DEVICE_DATA xpdd = context;
 
-  KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
+//  KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
 
-  KdPrint((__DRIVER_NAME "     path = %s\n", path));
+//  KdPrint((__DRIVER_NAME "     path = %s\n", path));
   bits = SplitString(path, '/', 4, &count);
-  KdPrint((__DRIVER_NAME "     count = %d\n", count));
+//  KdPrint((__DRIVER_NAME "     count = %d\n", count));
 
   if (count == 3)
   {
@@ -553,7 +598,7 @@ XenPci_DeviceWatchHandler(char *path, PVOID context)
   }
   FreeSplitString(bits, count);
 
-  KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
+//  KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
 }
 
 static DDKAPI VOID
