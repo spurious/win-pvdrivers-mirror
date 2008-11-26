@@ -125,7 +125,11 @@ XenPci_BackEndStateHandler(char *path, PVOID context)
   PXENPCI_DEVICE_DATA xpdd = xppdd->bus_fdo->DeviceExtension;
   ULONG new_backend_state;
 
-//  KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
+#if !DBG
+  UNREFERENCED_PARAMETER(path);
+#endif
+  
+  //  KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
 
   /* check that path == device/id/state */
   //RtlStringCbPrintfA(path, ARRAY_SIZE(path), "%s/state", xppdd->path);
@@ -834,7 +838,7 @@ XenPci_Pdo_Resume(PDEVICE_OBJECT device_object)
       // reset things - feed the 'requested resources' back in
       ADD_XEN_INIT_REQ(&xppdd->requested_resources_ptr, XEN_INIT_TYPE_END, NULL, NULL);
       src = xppdd->requested_resources_start;
-      xppdd->requested_resources_ptr = xppdd->requested_resources_start = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, XENPCI_POOL_TAG);
+      xppdd->requested_resources_ptr = xppdd->requested_resources_start = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, XENPCI_POOL_TAG);;
       xppdd->assigned_resources_ptr = xppdd->assigned_resources_start;
       
       dst = MmMapIoSpace(xppdd->config_page_phys, xppdd->config_page_length, MmNonCached);
@@ -937,6 +941,10 @@ VOID
 XenPci_DumpPdoConfig(PDEVICE_OBJECT device_object)
 {
   PXENPCI_PDO_DEVICE_DATA xppdd = (PXENPCI_PDO_DEVICE_DATA)device_object->DeviceExtension;
+
+#if !DBG
+  UNREFERENCED_PARAMETER(xppdd);
+#endif
 
   KdPrint((__DRIVER_NAME "     path = %s\n", xppdd->path));
   KdPrint((__DRIVER_NAME "     backend_path = %s\n", xppdd->backend_path));
