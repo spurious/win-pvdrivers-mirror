@@ -84,9 +84,10 @@ put_pb_on_freelist(struct xennet_info *xi, shared_buffer_t *pb)
     //NDIS_BUFFER_LINKAGE(pb->buffer) = NULL;
     if (xi->rx_pb_free > RX_MAX_PB_FREELIST)
     {
+      xi->vectors.GntTbl_EndAccess(xi->vectors.context, pb->gref, FALSE, (ULONG)'XNRX');
       IoFreeMdl(pb->mdl);
-    NdisFreeMemory(pb->virtual, PAGE_SIZE, 0);
-    NdisFreeMemory(pb, sizeof(shared_buffer_t), 0);
+      NdisFreeMemory(pb->virtual, PAGE_SIZE, 0);
+      NdisFreeMemory(pb, sizeof(shared_buffer_t), 0);
       return;
     }
     pb->mdl->ByteCount = PAGE_SIZE;
@@ -131,7 +132,7 @@ get_hb_from_freelist(struct xennet_info *xi)
 static __inline VOID
 put_hb_on_freelist(struct xennet_info *xi, shared_buffer_t *hb)
 {
-  ASSERT(xi);
+  NT_ASSERT(xi);
   hb->mdl->ByteCount = sizeof(shared_buffer_t) + MAX_ETH_HEADER_LENGTH + MAX_LOOKAHEAD_LENGTH;
   hb->mdl->Next = NULL;
   hb->next = NULL;
@@ -172,12 +173,12 @@ XenNet_FillRing(struct xennet_info *xi)
 
     /* Give to netback */
     id = (USHORT)((req_prod + i) & (NET_RX_RING_SIZE - 1));
-    ASSERT(xi->rx_ring_pbs[id] == NULL);
+    NT_ASSERT(xi->rx_ring_pbs[id] == NULL);
     xi->rx_ring_pbs[id] = page_buf;
     req = RING_GET_REQUEST(&xi->rx, req_prod + i);
     req->id = id;
     req->gref = page_buf->gref;
-    ASSERT(req->gref != INVALID_GRANT_REF);
+    NT_ASSERT(req->gref != INVALID_GRANT_REF);
   }
   KeMemoryBarrier();
   xi->rx.req_prod_pvt = req_prod + i;
@@ -243,7 +244,7 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi)
     NB_FIRST_PB(nb) = pi->first_pb;
     ref_pb(xi, pi->first_pb);
   } else {
-    ASSERT(ndis_os_minor_version >= 1);
+    NT_ASSERT(ndis_os_minor_version >= 1);
     header_buf = get_hb_from_freelist(xi);
     if (!header_buf)
     {
@@ -261,7 +262,7 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi)
     /* make sure only the header is in the first buffer (or the entire packet, but that is done in the above case) */
     XenNet_BuildHeader(pi, header_va, MAX_ETH_HEADER_LENGTH + pi->ip4_header_length + pi->tcp_header_length);
     header_extra = pi->header_length - (MAX_ETH_HEADER_LENGTH + pi->ip4_header_length + pi->tcp_header_length);
-    ASSERT(pi->header_length <= MAX_ETH_HEADER_LENGTH + MAX_LOOKAHEAD_LENGTH);
+    NT_ASSERT(pi->header_length <= MAX_ETH_HEADER_LENGTH + MAX_LOOKAHEAD_LENGTH);
     header_buf->mdl->ByteCount = pi->header_length;
     mdl_head = mdl_tail = curr_mdl = header_buf->mdl;
     NB_FIRST_PB(nb) = header_buf;
@@ -286,12 +287,12 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi)
       pi->tcp_remaining = (USHORT)(pi->tcp_remaining - tcp_length);
       /* part of the packet is already present in the header buffer for lookahead */
       out_remaining = tcp_length - header_extra;
-      ASSERT((LONG)out_remaining >= 0);
+      NT_ASSERT((LONG)out_remaining >= 0);
     }
     else
     {
       out_remaining = pi->total_length - pi->header_length;
-      ASSERT((LONG)out_remaining >= 0);
+      NT_ASSERT((LONG)out_remaining >= 0);
     }
     //KdPrint((__DRIVER_NAME "     before loop - out_remaining = %d\n", out_remaining));
 
@@ -315,7 +316,7 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi)
       in_buffer_length = MmGetMdlByteCount(pi->curr_mdl);
       out_length = min(out_remaining, in_buffer_length - pi->curr_mdl_offset);
       curr_mdl = IoAllocateMdl((PUCHAR)MmGetMdlVirtualAddress(pi->curr_mdl) + pi->curr_mdl_offset, out_length, FALSE, FALSE, NULL);
-      ASSERT(curr_mdl);
+      NT_ASSERT(curr_mdl);
       IoBuildPartialMdl(pi->curr_mdl, curr_mdl, (PUCHAR)MmGetMdlVirtualAddress(pi->curr_mdl) + pi->curr_mdl_offset, out_length);
       mdl_tail->Next = curr_mdl;
       mdl_tail = curr_mdl;
@@ -508,7 +509,7 @@ XenNet_ReturnNetBufferLists(NDIS_HANDLE adapter_context, PNET_BUFFER_LIST curr_n
 
   //KdPrint((__DRIVER_NAME "     page_buf = %p\n", page_buf));
 
-  ASSERT(xi);
+  NT_ASSERT(xi);
   while (curr_nbl)
   {
     PNET_BUFFER_LIST next_nbl;
@@ -530,7 +531,7 @@ XenNet_ReturnNetBufferLists(NDIS_HANDLE adapter_context, PNET_BUFFER_LIST curr_n
         shared_buffer_t *next_buf;
         PMDL next_mdl;
         
-        ASSERT(page_buf); /* make sure that there is a pb to match this mdl */
+        NT_ASSERT(page_buf); /* make sure that there is a pb to match this mdl */
         next_mdl = curr_mdl->Next;
         next_buf = page_buf->next;
         if (!page_buf->virtual)
@@ -638,7 +639,7 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
     {
       id = (USHORT)(cons & (NET_RX_RING_SIZE - 1));
       page_buf = xi->rx_ring_pbs[id];
-      ASSERT(page_buf);
+      NT_ASSERT(page_buf);
       xi->rx_ring_pbs[id] = NULL;
       xi->rx_id_free++;
       memcpy(&page_buf->rsp, RING_GET_RESPONSE(&xi->rx, cons), max(sizeof(struct netif_rx_response), sizeof(struct netif_extra_info)));
@@ -649,7 +650,7 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
         {
           KdPrint((__DRIVER_NAME "     Error: rsp offset %d, size %d\n",
             page_buf->rsp.offset, page_buf->rsp.status));
-          ASSERT(!extra_info_flag);
+          NT_ASSERT(!extra_info_flag);
           put_pb_on_freelist(xi, page_buf);
           continue;
         }
@@ -759,7 +760,7 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
         case XEN_NETIF_GSO_TYPE_TCPV4:
           pi->mss = ei->u.gso.size;
           //KdPrint((__DRIVER_NAME "     mss = %d\n", pi->mss));
-          // TODO - put this assertion somewhere ASSERT(header_len + pi->mss <= PAGE_SIZE); // this limits MTU to PAGE_SIZE - XN_HEADER_LEN
+          // TODO - put this assertion somewhere NT_ASSERT(header_len + pi->mss <= PAGE_SIZE); // this limits MTU to PAGE_SIZE - XN_HEADER_LEN
           break;
         default:
           KdPrint((__DRIVER_NAME "     Unknown GSO type (%d) detected\n", ei->u.gso.type));
@@ -774,7 +775,7 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
     }
     else
     {
-      ASSERT(!page_buf->rsp.offset);
+      NT_ASSERT(!page_buf->rsp.offset);
       if (!more_data_flag) // handling the packet's 1st buffer
       {
         if (page_buf->rsp.flags & NETRXF_csum_blank)
@@ -787,11 +788,11 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
       //KdPrint((__DRIVER_NAME "     buffer = %p, pb = %p\n", buffer, page_buf));
       if (pi->first_pb)
       {
-        ASSERT(pi->curr_pb);
+        NT_ASSERT(pi->curr_pb);
         //KdPrint((__DRIVER_NAME "     additional buffer\n"));
         pi->curr_pb->next = page_buf;
         pi->curr_pb = page_buf;
-        ASSERT(pi->curr_mdl);
+        NT_ASSERT(pi->curr_mdl);
         pi->curr_mdl->Next = mdl;
         pi->curr_mdl = mdl;
       }
@@ -818,7 +819,7 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
 
     page_buf = next_buf;
   }
-  ASSERT(!more_data_flag && !extra_info_flag);
+  NT_ASSERT(!more_data_flag && !extra_info_flag);
 
   if (rc.first_nbl)
   {

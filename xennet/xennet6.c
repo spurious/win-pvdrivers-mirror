@@ -142,7 +142,7 @@ XenNet_ConnectBackend(struct xennet_info *xi)
 
   FUNCTION_ENTER();
   
-  ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
+  NT_ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
 
   xi->backend_csum_supported = TRUE; /* just assume this */
   xi->backend_gso_value = 0;
@@ -252,7 +252,7 @@ XenNet_ResumeWorkItem(PDEVICE_OBJECT device_object, PVOID context)
   
   FUNCTION_ENTER();
 
-  ASSERT(xi->resume_work_item);
+  NT_ASSERT(xi->resume_work_item);
 
   IoFreeWorkItem(xi->resume_work_item);
   
