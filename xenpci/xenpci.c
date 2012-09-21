@@ -741,7 +741,9 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
   DECLARE_CONST_UNICODE_STRING(txt_always_patch_name, L"txt_patch_tpr_always");
   WDFSTRING wdf_system_start_options;
   UNICODE_STRING system_start_options;
+#if (NTDDI_VERSION >= NTDDI_WS03SP1)
   PHYSICAL_ADDRESS dump_header_mem_max;
+#endif
   
   UNREFERENCED_PARAMETER(RegistryPath);
 
