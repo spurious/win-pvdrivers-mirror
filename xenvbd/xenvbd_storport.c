@@ -51,11 +51,11 @@ ULONGLONG parse_numeric_string(PCHAR string)
   return val;
 }
 
+/* called with StartIoLock held */
 static blkif_shadow_t *
 get_shadow_from_freelist(PXENVBD_DEVICE_DATA xvdd)
 {
-  if (xvdd->shadow_free == 0)
-  {
+  if (xvdd->shadow_free == 0) {
     KdPrint((__DRIVER_NAME "     No more shadow entries\n"));
     return NULL;
   }
@@ -65,12 +65,14 @@ get_shadow_from_freelist(PXENVBD_DEVICE_DATA xvdd)
   return &xvdd->shadows[xvdd->shadow_free_list[xvdd->shadow_free]];
 }
 
+/* called with StartIoLock held */
 static VOID
 put_shadow_on_freelist(PXENVBD_DEVICE_DATA xvdd, blkif_shadow_t *shadow)
 {
   xvdd->shadow_free_list[xvdd->shadow_free] = (USHORT)(shadow->req.id & SHADOW_ID_ID_MASK);
   shadow->srb = NULL;
   shadow->reset = FALSE;
+  shadow->aligned_buffer_in_use = FALSE;
   xvdd->shadow_free++;
 }
 
@@ -433,6 +435,7 @@ XenVbd_PutSrbOnList(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb)
   InsertTailList(&xvdd->srb_list, (PLIST_ENTRY)srb_entry);
 }
 
+/* called with StartIoLock held */
 static VOID
 XenVbd_PutQueuedSrbsOnRing(PXENVBD_DEVICE_DATA xvdd)
 {
@@ -448,18 +451,17 @@ XenVbd_PutQueuedSrbsOnRing(PXENVBD_DEVICE_DATA xvdd)
   int notify;
   int i;
   PVOID system_address;
+  BOOLEAN failed;
 
   //if (dump_mode) FUNCTION_ENTER();
 
   while(!xvdd->aligned_buffer_in_use && xvdd->shadow_free && (srb_entry = (srb_list_entry_t *)RemoveHeadList(&xvdd->srb_list)) != (srb_list_entry_t *)&xvdd->srb_list)
   {
     srb = srb_entry->srb;
-    ASSERT(srb);
-    if (srb->Function != SRB_FUNCTION_EXECUTE_SCSI)
-    {
+    NT_ASSERT(srb);
+    if (srb->Function != SRB_FUNCTION_EXECUTE_SCSI) {
       KdPrint((__DRIVER_NAME "     SRB_FUNCTION_%02x retrieved from ring\n", srb->Function));
-      if (xvdd->shadow_free != SHADOW_ENTRIES)
-      {
+      if (xvdd->shadow_free != SHADOW_ENTRIES) {
         KdPrint((__DRIVER_NAME "     busy\n"));
         /* put it back at the end of the list just in case something is queued that needs to be processed */
         InsertTailList(&xvdd->srb_list, (PLIST_ENTRY)srb->SrbExtension);
@@ -474,19 +476,15 @@ XenVbd_PutQueuedSrbsOnRing(PXENVBD_DEVICE_DATA xvdd)
       }
     }
 
-    if (!dump_mode)
-    {
-      if (StorPortGetSystemAddress(xvdd, srb, &system_address) != STOR_STATUS_SUCCESS)
-      {
+    if (!dump_mode) {
+      if (StorPortGetSystemAddress(xvdd, srb, &system_address) != STOR_STATUS_SUCCESS) {
         KdPrint((__DRIVER_NAME "     Failed to map DataBuffer\n"));
         srb->SrbStatus = SRB_STATUS_BUSY;
         StorPortNotification(RequestComplete, xvdd, srb);
         continue;
       }
       system_address = (PUCHAR)system_address + srb_entry->offset;
-    }
-    else
-    {
+    } else {
       //KdPrint((__DRIVER_NAME "     DataBuffer = %p\n", srb->DataBuffer));
       system_address = (PUCHAR)srb->DataBuffer + srb_entry->offset;
     }
@@ -495,18 +493,17 @@ XenVbd_PutQueuedSrbsOnRing(PXENVBD_DEVICE_DATA xvdd)
     block_count *= xvdd->bytes_per_sector / 512;
     sector_number *= xvdd->bytes_per_sector / 512;
 
-    ASSERT(block_count * 512 == srb->DataTransferLength);
-    
+    NT_ASSERT(block_count * 512 == srb->DataTransferLength);
     
     sector_number += srb_entry->offset / 512;
     block_count -= srb_entry->offset / 512;
 
+    NT_ASSERT(block_count > 0);
+
     /* look for pending writes that overlap this one */
     /* we get warnings from drbd if we don't */
-    if (srb_entry->offset == 0)
-    {
-      for (i = 0; i < MAX_SHADOW_ENTRIES; i++)
-      {
+    if (srb_entry->offset == 0) {
+      for (i = 0; i < MAX_SHADOW_ENTRIES; i++) {
         PSCSI_REQUEST_BLOCK srb2;
         ULONGLONG sector_number2;
         ULONG block_count2;
@@ -532,21 +529,19 @@ XenVbd_PutQueuedSrbsOnRing(PXENVBD_DEVICE_DATA xvdd)
         InsertHeadList(&xvdd->srb_list, (PLIST_ENTRY)srb->SrbExtension);
         break; /* stall the queue */
       }
-      if (i != MAX_SHADOW_ENTRIES)
-      {
+      if (i != MAX_SHADOW_ENTRIES) {
         break; /* stall the queue but submit any outstanding requests */
       }
     }
     
     shadow = get_shadow_from_freelist(xvdd);
-    if (!shadow)
-    {
+    if (!shadow) {
       /* put the srb back at the start of the queue */
       InsertHeadList(&xvdd->srb_list, (PLIST_ENTRY)srb->SrbExtension);
       break; /* stall the queue but submit any outstanding requests */
     }
-    ASSERT(!shadow->aligned_buffer_in_use);
-    ASSERT(!shadow->srb);
+    NT_ASSERT(!shadow->aligned_buffer_in_use);
+    NT_ASSERT(!shadow->srb);
     shadow->req.sector_number = sector_number;
     shadow->req.handle = 0;
     shadow->req.operation = decode_cdb_is_read(srb)?BLKIF_OP_READ:BLKIF_OP_WRITE;
@@ -556,10 +551,8 @@ XenVbd_PutQueuedSrbsOnRing(PXENVBD_DEVICE_DATA xvdd)
     shadow->system_address = system_address;
     shadow->reset = FALSE;
 
-    if (!dump_mode)
-    {
-      if ((ULONG_PTR)shadow->system_address & 511)
-      {
+    if (!dump_mode) {
+      if ((ULONG_PTR)shadow->system_address & 511) {
         xvdd->aligned_buffer_in_use = TRUE;
         /* limit to aligned_buffer_size */
         block_count = min(block_count, xvdd->aligned_buffer_size / 512);
@@ -567,16 +560,12 @@ XenVbd_PutQueuedSrbsOnRing(PXENVBD_DEVICE_DATA xvdd)
         if (!decode_cdb_is_read(srb))
           memcpy(ptr, shadow->system_address, block_count * 512);
         shadow->aligned_buffer_in_use = TRUE;
-      }
-      else
-      {
+      } else {
         ptr = (PUCHAR)shadow->system_address;
         shadow->aligned_buffer_in_use = FALSE;
       }
-    }
-    else
-    {
-      ASSERT(!((ULONG_PTR)shadow->system_address & 511));
+    } else {
+      NT_ASSERT(!((ULONG_PTR)shadow->system_address & 511));
       ptr = shadow->system_address;
       shadow->aligned_buffer_in_use = FALSE;
     }
@@ -591,80 +580,64 @@ XenVbd_PutQueuedSrbsOnRing(PXENVBD_DEVICE_DATA xvdd)
     //KdPrint((__DRIVER_NAME "     operation = %d\n", shadow->req.operation));
     
     remaining = block_count * 512;
-    while (remaining > 0 && shadow->req.nr_segments < BLKIF_MAX_SEGMENTS_PER_REQUEST)
-    {
+    failed = FALSE;
+    while (remaining > 0 && shadow->req.nr_segments < BLKIF_MAX_SEGMENTS_PER_REQUEST) {
       PHYSICAL_ADDRESS physical_address;
 
-      if (!dump_mode)
-      {
+      if (!dump_mode) {
         physical_address = MmGetPhysicalAddress(ptr);
-      }
-      else
-      {
+      } else {
         ULONG length;       
         physical_address = StorPortGetPhysicalAddress(xvdd, srb, ptr, &length);
       }
       gref = xvdd->vectors.GntTbl_GrantAccess(xvdd->vectors.context,
              (ULONG)(physical_address.QuadPart >> PAGE_SHIFT), FALSE, INVALID_GRANT_REF, xvdd->grant_tag);
-      if (gref == INVALID_GRANT_REF)
-      {
+      if (gref == INVALID_GRANT_REF) {
         ULONG i;
-        for (i = 0; i < shadow->req.nr_segments; i++)
-        {
+        for (i = 0; i < shadow->req.nr_segments; i++) {
           xvdd->vectors.GntTbl_EndAccess(xvdd->vectors.context,
             shadow->req.seg[i].gref, FALSE, xvdd->grant_tag);
         }
-        if (shadow->aligned_buffer_in_use)
-        {
+        if (shadow->aligned_buffer_in_use) {
           shadow->aligned_buffer_in_use = FALSE;
           xvdd->aligned_buffer_in_use = FALSE;
         }
         /* put the srb back at the start of the queue */
-        InsertHeadList(&xvdd->srb_list, (PLIST_ENTRY)srb->SrbExtension);
+        InsertHeadList(&xvdd->srb_list, (PLIST_ENTRY)srb_entry);
         put_shadow_on_freelist(xvdd, shadow);
         KdPrint((__DRIVER_NAME "     Out of gref's. Deferring\n"));
+        failed = TRUE;
+        /* what if there are no requests currently in progress to kick the queue again?? */
         break; /* stall the queue but submit any outstanding requests */
       }
       offset = physical_address.LowPart & (PAGE_SIZE - 1);
       length = min(PAGE_SIZE - offset, remaining);
-      //if (dump_mode) KdPrint((__DRIVER_NAME "     length = %d\n", length));
-      //if (dump_mode) KdPrint((__DRIVER_NAME "     offset = %d\n", length));
-      ASSERT((offset & 511) == 0);
-      ASSERT((length & 511) == 0);
-      ASSERT(offset + length <= PAGE_SIZE);
+      NT_ASSERT((offset & 511) == 0);
+      NT_ASSERT((length & 511) == 0);
+      NT_ASSERT(offset + length <= PAGE_SIZE);
       shadow->req.seg[shadow->req.nr_segments].gref = gref;
       shadow->req.seg[shadow->req.nr_segments].first_sect = (UCHAR)(offset / 512);
       shadow->req.seg[shadow->req.nr_segments].last_sect = (UCHAR)(((offset + length) / 512) - 1);
-      //if (dump_mode) KdPrint((__DRIVER_NAME "     gref = %d\n", shadow->req.seg[shadow->req.nr_segments].gref));
-      //if (dump_mode) KdPrint((__DRIVER_NAME "     first_sect = %d\n", shadow->req.seg[shadow->req.nr_segments].first_sect));
-      //if (dump_mode) KdPrint((__DRIVER_NAME "     last_sect = %d\n", shadow->req.seg[shadow->req.nr_segments].last_sect));
       remaining -= length;
       ptr += length;
       shadow->length += length;
       shadow->req.nr_segments++;
     }
+    if (failed)
+      break;
     srb_entry->offset += shadow->length;
     srb_entry->outstanding_requests++;
-    //KdPrint((__DRIVER_NAME "     outstanding_requests   = %p\n", srb_entry->outstanding_requests));
-    //KdPrint((__DRIVER_NAME "     offset   = %d, length = %d\n", srb_entry->offset, srb_entry->length));
-    //KdPrint((__DRIVER_NAME "     ptr   = %p\n", ptr));
-    if (srb_entry->offset < srb_entry->length)
-    {
+    if (srb_entry->offset < srb_entry->length) {
       if (dump_mode) KdPrint((__DRIVER_NAME "     inserting back into list\n"));
       /* put the srb back at the start of the queue to continue on the next request */
       InsertHeadList(&xvdd->srb_list, (PLIST_ENTRY)srb_entry);
     }
-
     XenVbd_PutRequest(xvdd, &shadow->req);
   }
   RING_PUSH_REQUESTS_AND_CHECK_NOTIFY(&xvdd->ring, notify);
-  if (notify)
-  {
-    //KdPrint((__DRIVER_NAME "     Notifying\n"));
+  if (notify) {
     xvdd->vectors.EvtChn_Notify(xvdd->vectors.context, xvdd->event_channel);
   }
-    
-  //if (dump_mode) FUNCTION_EXIT();
 }
 
 static ULONG
@@ -1161,9 +1134,9 @@ XenVbd_HandleEventSynchronised(PVOID DeviceExtension, PVOID context)
         else
         {
           srb = shadow->srb;
-          ASSERT(srb);
+          NT_ASSERT(srb);
           srb_entry = srb->SrbExtension;
-          ASSERT(srb_entry);
+          NT_ASSERT(srb_entry);
           /* a few errors occur in dump mode because Xen refuses to allow us to map pages we are using for other stuff. Just ignore them */
           if (rep->status == BLKIF_RSP_OKAY || (dump_mode &&  dump_mode_errors++ < DUMP_MODE_ERROR_LIMIT))
             srb->SrbStatus = SRB_STATUS_SUCCESS;
@@ -1178,7 +1151,7 @@ XenVbd_HandleEventSynchronised(PVOID DeviceExtension, PVOID context)
           }
           if (shadow->aligned_buffer_in_use)
           {
-            ASSERT(xvdd->aligned_buffer_in_use);
+            NT_ASSERT(xvdd->aligned_buffer_in_use);
             xvdd->aligned_buffer_in_use = FALSE;
             if (srb->SrbStatus == SRB_STATUS_SUCCESS && decode_cdb_is_read(srb))
               memcpy((PUCHAR)shadow->system_address, xvdd->aligned_buffer, shadow->length);
@@ -1202,9 +1175,6 @@ XenVbd_HandleEventSynchronised(PVOID DeviceExtension, PVOID context)
             StorPortNotification(RequestComplete, xvdd, srb);
           }
         }
-        shadow->aligned_buffer_in_use = FALSE;
-        shadow->srb = NULL;
-        shadow->reset = FALSE;
         put_shadow_on_freelist(xvdd, shadow);
         break;
       }
@@ -1222,7 +1192,6 @@ XenVbd_HandleEventSynchronised(PVOID DeviceExtension, PVOID context)
     }
   }
 
-  //if (start_ring_detect_state == RING_DETECT_STATE_COMPLETE)
   XenVbd_PutQueuedSrbsOnRing(xvdd);
 
   if (suspend_resume_state_pdo == SR_STATE_SUSPENDING)
@@ -1955,8 +1924,8 @@ XenVbd_HwStorAdapterControl(PVOID DeviceExtension, SCSI_ADAPTER_CONTROL_TYPE Con
       KdPrint((__DRIVER_NAME "     inactive - nothing to do\n"));
       break;
     }
-    ASSERT(IsListEmpty(&xvdd->srb_list));
-    ASSERT(xvdd->shadow_free == SHADOW_ENTRIES);
+    NT_ASSERT(IsListEmpty(&xvdd->srb_list));
+    NT_ASSERT(xvdd->shadow_free == SHADOW_ENTRIES);
     break;
   case ScsiRestartAdapter:
     KdPrint((__DRIVER_NAME "     ScsiRestartAdapter\n"));
