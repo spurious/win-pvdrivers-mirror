@@ -38,6 +38,7 @@ static EVT_WDF_DEVICE_USAGE_NOTIFICATION XenPci_EvtDeviceUsageNotification;
 static EVT_WDF_DEVICE_PREPARE_HARDWARE XenHide_EvtDevicePrepareHardware;
 
 #if (NTDDI_VERSION >= NTDDI_WS03SP1)
+static KBUGCHECK_REASON_CALLBACK_ROUTINE XenPci_DebugHeaderDumpIoCallback;
 
 /* this is supposed to be defined in wdm.h, but isn't */
 NTSTATUS 
@@ -692,9 +693,35 @@ XenPci_InitialBalloonDown()
   return head;
 }
 
+#if (NTDDI_VERSION >= NTDDI_WS03SP1)  
 /* this isn't freed on shutdown... perhaps it should be */
-PVOID dump_page;
+static PUCHAR dump_header;
+static ULONG dump_header_size;
+static ULONG dump_header_refreshed_flag = FALSE;
+static KBUGCHECK_REASON_CALLBACK_RECORD callback_record;
+#define DUMP_HEADER_PREFIX_SIZE 8
+#define DUMP_HEADER_SUFFIX_SIZE 8
 
+/* call KeInitializeCrashDumpHeader once on crash */
+static VOID
+XenPci_DebugHeaderDumpIoCallback(
+  KBUGCHECK_CALLBACK_REASON reason,
+  PKBUGCHECK_REASON_CALLBACK_RECORD record,
+  PVOID reason_specific_data,
+  ULONG reason_specific_data_length) {
+  UNREFERENCED_PARAMETER(reason);
+  UNREFERENCED_PARAMETER(record);
+  UNREFERENCED_PARAMETER(reason_specific_data);
+  UNREFERENCED_PARAMETER(reason_specific_data_length);
+  if (!dump_header_refreshed_flag) {
+    NTSTATUS status;
+    status = KeInitializeCrashDumpHeader(DUMP_TYPE_FULL, 0, dump_header + DUMP_HEADER_PREFIX_SIZE, dump_header_size, &dump_header_size);
+    /* copy bug check code in? */
+    dump_header_refreshed_flag = TRUE;
+  }
+}
+#endif
+  
 NTSTATUS
 DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 {
@@ -714,15 +741,13 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
   DECLARE_CONST_UNICODE_STRING(txt_always_patch_name, L"txt_patch_tpr_always");
   WDFSTRING wdf_system_start_options;
   UNICODE_STRING system_start_options;
-#if (NTDDI_VERSION >= NTDDI_WS03SP1)  
-  ULONG dump_header_size;
-#endif
+  PHYSICAL_ADDRESS dump_header_mem_max;
   
   UNREFERENCED_PARAMETER(RegistryPath);
 
   FUNCTION_ENTER();
 
-  KdPrint((__DRIVER_NAME " " VER_FILEVERSION_STR "\n"));
+  FUNCTION_MSG(__DRIVER_NAME " " VER_FILEVERSION_STR "\n");
 
   #if DBG
   XenPci_HookDbgPrint();
@@ -733,9 +758,25 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 
 #if (NTDDI_VERSION >= NTDDI_WS03SP1)
   status = KeInitializeCrashDumpHeader(DUMP_TYPE_FULL, 0, NULL, 0, &dump_header_size);
-  dump_page = ExAllocatePoolWithTag(NonPagedPool, dump_header_size, XENPCI_POOL_TAG);
-  status = KeInitializeCrashDumpHeader(DUMP_TYPE_FULL, 0, dump_page, dump_header_size, &dump_header_size);
-  KdPrint((__DRIVER_NAME "     KeInitializeCrashDumpHeader status = %08x, size = %d\n", status, dump_header_size));
+  /* try and allocate contiguous memory as low as possible */
+  dump_header = NULL;
+  dump_header_mem_max.QuadPart = 0xFFFFF;
+  while (!dump_header && dump_header_mem_max.QuadPart != 0xFFFFFFFFFFFFFFFF) {
+    dump_header = MmAllocateContiguousMemory(DUMP_HEADER_PREFIX_SIZE + dump_header_size + DUMP_HEADER_SUFFIX_SIZE, dump_header_mem_max);
+    dump_header_mem_max.QuadPart = (dump_header_mem_max.QuadPart << 8) | 0xF;
+  }
+  if (dump_header) {
+    status = KeInitializeCrashDumpHeader(DUMP_TYPE_FULL, 0, dump_header + DUMP_HEADER_PREFIX_SIZE, dump_header_size, &dump_header_size);
+    FUNCTION_MSG("KeInitializeCrashDumpHeader status = %08x, size = %d\n", status, dump_header_size);
+    memcpy(dump_header + 0, "XENXEN", 6); /* magic number */
+    *(PUSHORT)(dump_header + 6) = (USHORT)(INT_PTR)dump_header & (PAGE_SIZE - 1); /* store offset too as additional verification */
+    memcpy(dump_header + DUMP_HEADER_PREFIX_SIZE + dump_header_size, "XENXEN", 6);
+    *(PUSHORT)(dump_header + DUMP_HEADER_PREFIX_SIZE + dump_header_size + 6) = (USHORT)(INT_PTR)dump_header & (PAGE_SIZE - 1); /* store offset too as additional verification */
+    KeInitializeCallbackRecord(&callback_record);
+    KeRegisterBugCheckReasonCallback(&callback_record, XenPci_DebugHeaderDumpIoCallback, KbCallbackDumpIo, (PUCHAR)"XenPci_DebugHeaderDumpIoCallback");
+  } else {
+    FUNCTION_MSG("Failed to allocate memory for crash dump header\n");
+  }
 #endif
 
   /* again after enabling DbgPrint hooking */
