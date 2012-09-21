@@ -259,7 +259,7 @@ XenVbd_InitFromConfig(PXENVBD_DEVICE_DATA xvdd)
       if (strcmp(setting, "sectors") == 0)
         xvdd->total_sectors = parse_numeric_string(value);
       else if (strcmp(setting, "sector-size") == 0)
-        xvdd->bytes_per_sector = (ULONG)parse_numeric_string(value);
+        xvdd->hw_bytes_per_sector = (ULONG)parse_numeric_string(value);
       else if (strcmp(setting, "device-type") == 0)
       {
         if (strcmp(value, "disk") == 0)
@@ -325,30 +325,29 @@ XenVbd_InitFromConfig(PXENVBD_DEVICE_DATA xvdd)
       || xvdd->sring == NULL
       || xvdd->event_channel == 0
       || xvdd->total_sectors == 0
-      || xvdd->bytes_per_sector == 0))
+      || xvdd->hw_bytes_per_sector == 0))
   {
     KdPrint((__DRIVER_NAME "     Missing settings\n"));
     FUNCTION_EXIT();
     return SP_RETURN_BAD_CONFIG;
   }
 
-  if (xvdd->inactive)
+  if (xvdd->inactive) {
     KdPrint((__DRIVER_NAME "     Device is inactive\n"));
-  else
-  {
-    if (xvdd->device_type == XENVBD_DEVICETYPE_CDROM)
-    {
+  } else {
+    if (xvdd->device_type == XENVBD_DEVICETYPE_CDROM) {
       /* CD/DVD drives must have bytes_per_sector = 2048. */
       xvdd->bytes_per_sector = 2048;
+      xvdd->hw_bytes_per_sector = 2048;
+    } else {
+      xvdd->bytes_per_sector = 512;
     }
-
     /* for some reason total_sectors is measured in 512 byte sectors always, so correct this to be in bytes_per_sectors */
     xvdd->total_sectors /= xvdd->bytes_per_sector / 512;
 
     xvdd->shadow_free = 0;
     memset(xvdd->shadows, 0, sizeof(blkif_shadow_t) * SHADOW_ENTRIES);
-    for (i = 0; i < SHADOW_ENTRIES; i++)
-    {
+    for (i = 0; i < SHADOW_ENTRIES; i++) {
       xvdd->shadows[i].req.id = i;
       /* make sure leftover real requests's are never confused with dump mode requests */
       if (dump_mode)
@@ -439,6 +438,7 @@ XenVbd_PutQueuedSrbsOnRing(PXENVBD_DEVICE_DATA xvdd)
 {
   PSCSI_REQUEST_BLOCK srb;
   srb_list_entry_t *srb_entry;
+  /* sector_number and block_count are the adjusted-to-512-byte-sector values */
   ULONGLONG sector_number;
   ULONG block_count;
   blkif_shadow_t *shadow;
@@ -491,13 +491,12 @@ XenVbd_PutQueuedSrbsOnRing(PXENVBD_DEVICE_DATA xvdd)
       system_address = (PUCHAR)srb->DataBuffer + srb_entry->offset;
     }
     block_count = decode_cdb_length(srb);
-    block_count *= xvdd->bytes_per_sector / 512;
     sector_number = decode_cdb_sector(srb);
+    block_count *= xvdd->bytes_per_sector / 512;
     sector_number *= xvdd->bytes_per_sector / 512;
 
-    ASSERT(block_count * xvdd->bytes_per_sector == srb->DataTransferLength);
+    ASSERT(block_count * 512 == srb->DataTransferLength);
     
-    //KdPrint((__DRIVER_NAME "     srb sector_number = %d, block_count = %d\n", (ULONG)sector_number, block_count));
     
     sector_number += srb_entry->offset / 512;
     block_count -= srb_entry->offset / 512;
@@ -1428,7 +1427,6 @@ XenVbd_HwStorStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
 //      KdPrint((__DRIVER_NAME "     (LUN = %d, EVPD = %d, Page Code = %02X)\n", srb->Cdb[1] >> 5, srb->Cdb[1] & 1, srb->Cdb[2]));
 //      KdPrint((__DRIVER_NAME "     (Length = %d)\n", srb->DataTransferLength));
       
-      //data_buffer = LongLongToPtr(ScsiPortGetPhysicalAddress(xvdd, srb, srb->DataBuffer, &data_buffer_length).QuadPart);
       data_buffer = srb->DataBuffer;
       RtlZeroMemory(data_buffer, srb->DataTransferLength);
       srb_status = SRB_STATUS_SUCCESS;
@@ -1590,7 +1588,6 @@ XenVbd_HwStorStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
       //KdPrint((__DRIVER_NAME "       LUN = %d, RelAdr = %d\n", srb->Cdb[1] >> 4, srb->Cdb[1] & 1));
       //KdPrint((__DRIVER_NAME "       LBA = %02x%02x%02x%02x\n", srb->Cdb[2], srb->Cdb[3], srb->Cdb[4], srb->Cdb[5]));
       //KdPrint((__DRIVER_NAME "       PMI = %d\n", srb->Cdb[8] & 1));
-      //data_buffer = LongLongToPtr(ScsiPortGetPhysicalAddress(xvdd, srb, srb->DataBuffer, &data_buffer_length).QuadPart);
       data_buffer = srb->DataBuffer;
       RtlZeroMemory(data_buffer, srb->DataTransferLength);
       data_buffer[0] = (unsigned char)((xvdd->total_sectors - 1) >> 56) & 0xff;
@@ -1605,7 +1602,28 @@ XenVbd_HwStorStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
       data_buffer[9] = (unsigned char)(xvdd->bytes_per_sector >> 16) & 0xff;
       data_buffer[10] = (unsigned char)(xvdd->bytes_per_sector >> 8) & 0xff;
       data_buffer[11] = (unsigned char)(xvdd->bytes_per_sector >> 0) & 0xff;
-      data_transfer_length = 12;
+      data_buffer[12] = 0;
+      switch (xvdd->hw_bytes_per_sector / xvdd->bytes_per_sector) {
+      case 1:
+        data_buffer[13] = 0; /* 512 byte hardware sectors */
+        break;
+      case 2:
+        data_buffer[13] = 1; /* 1024 byte hardware sectors */
+        break;
+      case 3:
+        data_buffer[13] = 2; /* 2048 byte hardware sectors */
+        break;
+      case 4:
+        data_buffer[13] = 2; /* 4096 byte hardware sectors */
+        break;
+      default:
+        data_buffer[13] = 0; /* 512 byte hardware sectors */
+        KdPrint((__DRIVER_NAME "     Unknown logical blocks per physical block %d (%d / %d)\n", xvdd->hw_bytes_per_sector / xvdd->bytes_per_sector, xvdd->hw_bytes_per_sector, xvdd->bytes_per_sector));
+        break;
+      }
+      data_buffer[14] = 0;
+      data_buffer[15] = 0;
+      data_transfer_length = 16;
       srb->ScsiStatus = 0;
       srb_status = SRB_STATUS_SUCCESS;
       break;
