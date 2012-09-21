@@ -149,7 +149,8 @@ struct
   blkif_response_t tmp_rep;
   XENVBD_DEVICETYPE device_type;
   XENVBD_DEVICEMODE device_mode;
-  ULONG bytes_per_sector;
+  ULONG bytes_per_sector; /* 512 for disk, 2048 for CDROM) */
+  ULONG hw_bytes_per_sector; /* underlying hardware format, eg 4K */
   ULONGLONG total_sectors;
   XENPCI_VECTORS vectors;
   PXENPCI_DEVICE_STATE device_state;
