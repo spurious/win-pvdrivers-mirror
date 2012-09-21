@@ -81,7 +81,7 @@ XenPci_AllocMMIO(PXENPCI_DEVICE_DATA xpdd, ULONG len)
   addr.QuadPart += xpdd->platform_mmio_alloc;
   xpdd->platform_mmio_alloc += len;
 
-  ASSERT(xpdd->platform_mmio_alloc <= xpdd->platform_mmio_len);
+  NT_ASSERT(xpdd->platform_mmio_alloc <= xpdd->platform_mmio_len);
 
   return addr;
 }
@@ -113,7 +113,7 @@ XenPci_Init(PXENPCI_DEVICE_DATA xpdd)
 
   if (!xpdd->hypercall_stubs)
   {
-    ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
+    NT_ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
     xpdd->hypercall_stubs = hvm_get_hypercall_stubs();
   }
   if (!xpdd->hypercall_stubs)
@@ -121,7 +121,7 @@ XenPci_Init(PXENPCI_DEVICE_DATA xpdd)
 
   if (!xpdd->shared_info_area)
   {
-    ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
+    NT_ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
     /* this should be safe as this part will never be called on resume where IRQL == HIGH_LEVEL */
     xpdd->shared_info_area_unmapped = XenPci_AllocMMIO(xpdd, PAGE_SIZE);
     xpdd->shared_info_area = MmMapIoSpace(xpdd->shared_info_area_unmapped,
@@ -193,7 +193,7 @@ XenPci_SysrqHandler(char *path, PVOID context)
     KeBugCheckEx(('X' << 16)|('E' << 8)|('N'), 0x00000001, 0x00000000, 0x00000000, 0x00000000);
     break;
   case 'A': /* cause an assert */
-    ASSERT(1 == 0);
+    NT_ASSERT(1 == 0);
     break;
   default:
     KdPrint(("     Unhandled sysrq letter %c\n", letter));
@@ -694,7 +694,7 @@ XenPci_EvtDevicePrepareHardware (WDFDEVICE device, WDFCMRESLIST resources_raw, W
 
   FUNCTION_ENTER();
   
-  ASSERT(WdfCmResourceListGetCount(resources_raw) == WdfCmResourceListGetCount(resources_translated));
+  NT_ASSERT(WdfCmResourceListGetCount(resources_raw) == WdfCmResourceListGetCount(resources_translated));
   
   for (i = 0; i < WdfCmResourceListGetCount(resources_raw); i++)
   {

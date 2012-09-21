@@ -755,7 +755,7 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
   XenPci_HookDbgPrint();
   #endif
 
-  ASSERT(!balloon_mdl_head);
+  NT_ASSERT(!balloon_mdl_head);
   balloon_mdl_head = XenPci_InitialBalloonDown();
 
 #if (NTDDI_VERSION >= NTDDI_WS03SP1)
