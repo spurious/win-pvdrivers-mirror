@@ -10,6 +10,7 @@
 .*\.res$
 .*\.rsp$
 .*\.lib$
+.*\.wixobj$
 .*\.wixpdb$
 objfre_.*
 objchk_.*
