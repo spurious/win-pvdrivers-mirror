@@ -624,7 +624,7 @@ XenNet_SendNetBufferLists(
     curr_nbl = nb_lists;
     for (curr_nbl = nb_lists; curr_nbl; curr_nbl = NET_BUFFER_LIST_NEXT_NBL(curr_nbl))
     {
-      KdPrint((__DRIVER_NAME "     NBL %p\n", curr_nbl));
+      //KdPrint((__DRIVER_NAME "     NBL %p\n", curr_nbl));
       curr_nbl->Status = NDIS_STATUS_FAILURE;
     }
     /* this actions the whole list */
