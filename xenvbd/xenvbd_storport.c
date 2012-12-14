@@ -1402,17 +1402,13 @@ XenVbd_HwStorStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
       switch (xvdd->device_type)
       {
       case XENVBD_DEVICETYPE_DISK:
-        if ((srb->Cdb[1] & 1) == 0)
-        {
-          if (srb->Cdb[2])
-          {
+        if ((srb->Cdb[1] & 1) == 0) {
+          if (srb->Cdb[2]) {
             srb_status = SRB_STATUS_ERROR;
-          }
-          else
-          {
+          } else {
             PINQUIRYDATA id = (PINQUIRYDATA)data_buffer;
             id->DeviceType = DIRECT_ACCESS_DEVICE;
-            id->Versions = 4; /* minimum that WHQL says we must support */
+            id->Versions = 5; /* SPC-3 */
             id->ResponseDataFormat = 2; /* not sure about this but WHQL complains otherwise */
             id->HiSupport = 1; /* WHQL test says we should set this */
             //id->AdditionalLength = FIELD_OFFSET(INQUIRYDATA, VendorSpecific) - FIELD_OFFSET(INQUIRYDATA, AdditionalLength);
@@ -1423,21 +1419,22 @@ XenVbd_HwStorStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
             memcpy(id->ProductRevisionLevel, "0000", 4); // product revision level
             data_transfer_length = FIELD_OFFSET(INQUIRYDATA, VendorSpecific);
           }
-        }
-        else
-        {
-          switch (srb->Cdb[2])
-          {
+        } else {
+          switch (srb->Cdb[2]) {
           case VPD_SUPPORTED_PAGES: /* list of pages we support */
+            FUNCTION_MSG("VPD_SUPPORTED_PAGES\n");
             data_buffer[0] = DIRECT_ACCESS_DEVICE;
             data_buffer[1] = VPD_SUPPORTED_PAGES;
             data_buffer[2] = 0x00;
-            data_buffer[3] = 2;
-            data_buffer[4] = 0x00;
-            data_buffer[5] = 0x80;
-            data_transfer_length = 6;
+            data_buffer[3] = 4;
+            data_buffer[4] = VPD_SUPPORTED_PAGES;
+            data_buffer[5] = VPD_SERIAL_NUMBER;
+            data_buffer[6] = VPD_DEVICE_IDENTIFIERS;
+            data_buffer[7] = VPD_BLOCK_LIMITS;
+            data_transfer_length = 8;
             break;
           case VPD_SERIAL_NUMBER: /* serial number */
+            FUNCTION_MSG("VPD_SERIAL_NUMBER\n");
             data_buffer[0] = DIRECT_ACCESS_DEVICE;
             data_buffer[1] = VPD_SERIAL_NUMBER;
             data_buffer[2] = 0x00;
@@ -1446,6 +1443,7 @@ XenVbd_HwStorStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
             data_transfer_length = 12;
             break;
           case VPD_DEVICE_IDENTIFIERS: /* identification - we don't support any so just return zero */
+            FUNCTION_MSG("VPD_DEVICE_IDENTIFIERS\n");
             data_buffer[0] = DIRECT_ACCESS_DEVICE;
             data_buffer[1] = VPD_DEVICE_IDENTIFIERS;
             data_buffer[2] = 0x00;
@@ -1457,8 +1455,16 @@ XenVbd_HwStorStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
             memcpy(&data_buffer[8], xvdd->vectors.path, strlen(xvdd->vectors.path));
             data_transfer_length = (ULONG)(8 + strlen(xvdd->vectors.path));
             break;
+          case VPD_BLOCK_LIMITS: /* to indicate support for UNMAP (TRIM/DISCARD) */
+            FUNCTION_MSG("VPD_BLOCK_LIMITS\n");
+            // max descriptors = 1
+            // max sectors = 0xFFFFFFFF
+            // granularity = from xenbus
+            // alignment = from xenbus(?)
+            srb_status = SRB_STATUS_ERROR;
+            break;
           default:
-            //KdPrint((__DRIVER_NAME "     Unknown Page %02x requested\n", srb->Cdb[2]));
+            FUNCTION_MSG("Unknown Page %02x requested\n", srb->Cdb[2]);
             srb_status = SRB_STATUS_ERROR;
             break;
           }
@@ -1521,7 +1527,7 @@ XenVbd_HwStorStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
       }
       break;
     case SCSIOP_READ_CAPACITY:
-      if (dump_mode)
+      //if (dump_mode)
         KdPrint((__DRIVER_NAME "     Command = READ_CAPACITY\n"));
       //KdPrint((__DRIVER_NAME "       LUN = %d, RelAdr = %d\n", srb->Cdb[1] >> 4, srb->Cdb[1] & 1));
       //KdPrint((__DRIVER_NAME "       LBA = %02x%02x%02x%02x\n", srb->Cdb[2], srb->Cdb[3], srb->Cdb[4], srb->Cdb[5]));
@@ -1552,8 +1558,8 @@ XenVbd_HwStorStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
       srb_status = SRB_STATUS_SUCCESS;
       break;
     case SCSIOP_READ_CAPACITY16:
-      if (dump_mode)
-        KdPrint((__DRIVER_NAME "     Command = READ_CAPACITY\n"));
+      //if (dump_mode)
+        KdPrint((__DRIVER_NAME "     Command = READ_CAPACITY16\n"));
       //KdPrint((__DRIVER_NAME "       LUN = %d, RelAdr = %d\n", srb->Cdb[1] >> 4, srb->Cdb[1] & 1));
       //KdPrint((__DRIVER_NAME "       LBA = %02x%02x%02x%02x\n", srb->Cdb[2], srb->Cdb[3], srb->Cdb[4], srb->Cdb[5]));
       //KdPrint((__DRIVER_NAME "       PMI = %d\n", srb->Cdb[8] & 1));
@@ -1583,14 +1589,14 @@ XenVbd_HwStorStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
         data_buffer[13] = 2; /* 2048 byte hardware sectors */
         break;
       case 4:
-        data_buffer[13] = 2; /* 4096 byte hardware sectors */
+        data_buffer[13] = 3; /* 4096 byte hardware sectors */
         break;
       default:
         data_buffer[13] = 0; /* 512 byte hardware sectors */
         KdPrint((__DRIVER_NAME "     Unknown logical blocks per physical block %d (%d / %d)\n", xvdd->hw_bytes_per_sector / xvdd->bytes_per_sector, xvdd->hw_bytes_per_sector, xvdd->bytes_per_sector));
         break;
       }
-      data_buffer[14] = 0;
+      data_buffer[14] = 0xC0; //0;
       data_buffer[15] = 0;
       data_transfer_length = 16;
       srb->ScsiStatus = 0;
@@ -1611,6 +1617,15 @@ XenVbd_HwStorStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
       XenVbd_PutSrbOnList(xvdd, srb);
       XenVbd_PutQueuedSrbsOnRing(xvdd);
       break;
+    case SCSIOP_WRITE_SAME:
+    case SCSIOP_WRITE_SAME16:
+      /* not yet supported */
+      FUNCTION_MSG("WRITE_SAME\n");
+      break;
+    case SCSIOP_UNMAP:
+      /* not yet supported */
+      FUNCTION_MSG("UNMAP\n");
+      break;
     case SCSIOP_VERIFY:
     case SCSIOP_VERIFY16:
       // Should we do more here?
@@ -1618,16 +1633,26 @@ XenVbd_HwStorStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
         KdPrint((__DRIVER_NAME "     Command = VERIFY\n"));
       srb_status = SRB_STATUS_SUCCESS;
       break;
-#if 0
     case SCSIOP_REPORT_LUNS:
-      if (dump_mode)
-        KdPrint((__DRIVER_NAME "     Command = REPORT_LUNS\n"));
-      switch (srb->Cdb[1])
-      {
+      //if (dump_mode)
+        FUNCTION_MSG("Command = REPORT_LUNS\n");
+      switch (srb->Cdb[2]) {
+      case 1:
+        FUNCTION_MSG(" SELECT REPORT = %d\n", srb->Cdb[2] & 255);
+        break;
+      default:
+        FUNCTION_MSG(" SELECT REPORT = %d\n", srb->Cdb[2] & 255);
+        break;
       }
-      srb_status = SRB_STATUS_SUCCESS;;
+      FUNCTION_MSG(" ALLOCATION LENGTH = %d\n", (srb->Cdb[6] << 24)|(srb->Cdb[7] << 16)|(srb->Cdb[8] << 8)|(srb->Cdb[9]));
+      data_buffer = srb->DataBuffer;
+      RtlZeroMemory(data_buffer, srb->DataTransferLength);
+      data_buffer[3] = 8; /* 1 lun */
+      /* rest of the data is blank */
+      data_transfer_length = 16;
+      srb->ScsiStatus = 0;
+      srb_status = SRB_STATUS_SUCCESS;
       break;
-#endif
     case SCSIOP_REQUEST_SENSE:
       if (dump_mode)
         KdPrint((__DRIVER_NAME "     Command = REQUEST_SENSE\n"));
@@ -1695,6 +1720,7 @@ XenVbd_HwStorStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
       break;
     default:
       KdPrint((__DRIVER_NAME "     Unhandled EXECUTE_SCSI Command = %02X\n", srb->Cdb[0]));
+      xvdd->last_sense_key = SCSI_SENSE_ILLEGAL_REQUEST;
       srb_status = SRB_STATUS_ERROR;
       break;
     }
@@ -1883,7 +1909,11 @@ XenVbd_HwStorStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
     srb->SrbStatus = SRB_STATUS_SUCCESS;
     StorPortNotification(RequestComplete, DeviceExtension, srb);    
     break;
-  
+  case SRB_FUNCTION_WMI:
+    srb->SrbStatus = SRB_STATUS_INVALID_REQUEST;
+    StorPortNotification(RequestComplete, DeviceExtension, srb);
+    break;
+
   default:
     KdPrint((__DRIVER_NAME "     Unhandled srb->Function = %08X\n", srb->Function));
     srb->SrbStatus = SRB_STATUS_INVALID_REQUEST;

@@ -49,6 +49,10 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #define BLK_RING_SIZE __RING_SIZE((blkif_sring_t *)0, PAGE_SIZE)
 #define BLK_OTHER_RING_SIZE __RING_SIZE((blkif_other_sring_t *)0, PAGE_SIZE)
 
+#define SCSIOP_UNMAP 0x42
+
+#define VPD_BLOCK_LIMITS 0xB0
+
 #if defined(__x86_64__)
 #pragma pack(push, 4)
 #endif
