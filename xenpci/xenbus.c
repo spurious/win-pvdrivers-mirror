@@ -231,7 +231,7 @@ XenBus_WatchWorkItemProc(WDFWORKITEM workitem)
   PCHAR path;
   int index;
   PXENBUS_WATCH_ENTRY entry;
-  PXENBUS_WATCH_CALLBACK service_routine;
+  PXN_WATCH_CALLBACK service_routine;
   PVOID service_context;  
 
   //FUNCTION_ENTER();
@@ -587,7 +587,7 @@ XenBus_AddWatch(
   PVOID Context,
   xenbus_transaction_t xbt,
   char *Path,
-  PXENBUS_WATCH_CALLBACK ServiceRoutine,
+  PXN_WATCH_CALLBACK ServiceRoutine,
   PVOID ServiceContext)
 {
   PXENPCI_DEVICE_DATA xpdd = Context;
@@ -639,7 +639,7 @@ XenBus_RemWatch(
   PVOID Context,
   xenbus_transaction_t xbt,
   char *Path,
-  PXENBUS_WATCH_CALLBACK ServiceRoutine,
+  PXN_WATCH_CALLBACK ServiceRoutine,
   PVOID ServiceContext)
 {
   PXENPCI_DEVICE_DATA xpdd = Context;

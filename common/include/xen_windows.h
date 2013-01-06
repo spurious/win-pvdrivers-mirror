@@ -213,11 +213,124 @@ the wrong width is used with the wrong defined port
 
 #define INVALID_GRANT_REF 0xFFFFFFFF
 
+#define XN_BASE_FRONTEND 1 /* path is relative to frontend device */
+#define XN_BASE_BACKEND  2 /* path is relative to backend device */
+#define XN_BASE_GLOBAL   3 /* path is relative to root of xenstore */
+
+
+typedef PVOID XN_HANDLE;
+
+/* get a handle given a PDO */
+typedef XN_HANDLE
+(*PXN_GET_HANDLE)(PDEVICE_OBJECT pdo);
+
+typedef VOID
+(*PXN_WATCH_CALLBACK)(PVOID context, char *path);
+
+typedef VOID
+(*PXN_EVENT_CALLBACK)(PVOID context);
+
+typedef VOID
+(*PXN_BACKEND_STATE_CALLBACK)(PVOID context, ULONG state);
+
+ULONG
+XnGetVersion();
+
+XN_HANDLE
+XnOpenDevice(PDEVICE_OBJECT pdo, PXN_BACKEND_STATE_CALLBACK callback, PVOID context);
+
+VOID
+XnCloseDevice(XN_HANDLE handle);
+
+#define XN_VALUE_TYPE_QEMU_HIDE_FLAGS 1
+#define XN_VALUE_TYPE_QEMU_FILTER     2 /* true if qemu devices hidden by device filter, not by qemu */
+VOID
+XnGetValue(XN_HANDLE handle, ULONG value_type, PVOID value);
+
+#if 0
+PCHAR
+XnGetBackendPath(XN_HANDLE handle);
+#endif
+
+#if 0
+NTSTATUS
+XnAddWatch(XN_HANDLE handle, ULONG base, char *path, PXN_WATCH_CALLBACK callback, PVOID context);
+
+NTSTATUS
+XnRemoveWatch(XN_HANDLE handle, ULONG base, char *path, PXN_WATCH_CALLBACK callback, PVOID context);
+#endif
+
+NTSTATUS
+XnReadInt32(XN_HANDLE handle, ULONG base, PCHAR path, ULONG *value);
+
+NTSTATUS
+XnWriteInt32(XN_HANDLE handle, ULONG base, PCHAR path, ULONG value);
+
+NTSTATUS
+XnReadInt64(XN_HANDLE handle, ULONG base, PCHAR path, ULONGLONG *value);
+
+NTSTATUS
+XnWriteInt64(XN_HANDLE handle, ULONG base, PCHAR path, ULONGLONG value);
+
+NTSTATUS
+XnReadString(XN_HANDLE handle, ULONG base, PCHAR path, PCHAR *value);
+
+NTSTATUS
+XnWriteString(XN_HANDLE handle, ULONG base, PCHAR path, PCHAR value);
+
+NTSTATUS
+XnFreeString(XN_HANDLE handle, PCHAR string);
+
+NTSTATUS
+XnNotify(XN_HANDLE handle, evtchn_port_t port);
+
+grant_ref_t
+XnGrantAccess(XN_HANDLE handle, uint32_t frame, int readonly, grant_ref_t ref, ULONG tag);
+
+BOOLEAN
+XnEndAccess(XN_HANDLE handle, grant_ref_t ref, BOOLEAN keepref, ULONG tag);
+
+grant_ref_t
+XnAllocateGrant(XN_HANDLE handle, ULONG tag);
+
+VOID
+XnFreeGrant(XN_HANDLE handle, grant_ref_t ref, ULONG tag);
+
+evtchn_port_t
+XnAllocateEvent(XN_HANDLE handle);
+
+NTSTATUS
+XnBindEvent(XN_HANDLE handle, evtchn_port_t port, PXN_EVENT_CALLBACK callback, PVOID context);
+
+NTSTATUS
+XnUnBindEvent(XN_HANDLE handle, evtchn_port_t port);
+
+#ifndef XENPCI_POOL_TAG
+#define XENPCI_POOL_TAG (ULONG) 'XenP'
+#endif
+
+static __inline VOID
+XnFreeMem(XN_HANDLE handle, PVOID Ptr) {
+  UNREFERENCED_PARAMETER(handle);
+  ExFreePoolWithTag(Ptr, XENPCI_POOL_TAG);
+}
+
+
+
+
+
+
+
+
+#if 0
 typedef PHYSICAL_ADDRESS
 (*PXEN_ALLOCMMIO)(PVOID Context, ULONG Length);
 
 typedef void
 (*PXEN_FREEMEM)(PVOID Ptr);
+#endif
+
+#if 0
 
 typedef VOID
 (*PXEN_EVTCHN_SERVICE_ROUTINE)(PVOID Context);
@@ -294,16 +407,6 @@ typedef NTSTATUS
 
 typedef NTSTATUS
 (*PXEN_XENPCI_XEN_SHUTDOWN_DEVICE)(PVOID Context);
-
-#ifndef XENPCI_POOL_TAG
-#define XENPCI_POOL_TAG (ULONG) 'XenP'
-#endif
-
-static __inline VOID
-XenPci_FreeMem(PVOID Ptr)
-{
-  ExFreePoolWithTag(Ptr, XENPCI_POOL_TAG);
-}
 
 #define XEN_DATA_MAGIC (ULONG)'XV02'
 
@@ -689,4 +792,5 @@ typedef struct {
   ULONG max_sg_elements;
 } dma_driver_extension_t;
 
+#endif
 #endif

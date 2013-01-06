@@ -54,7 +54,7 @@ get_pb_from_freelist(struct xennet_info *xi)
     NdisFreeMemory(pb, sizeof(shared_buffer_t), 0);
     return NULL;
   }
-  pb->gref = (grant_ref_t)xi->vectors.GntTbl_GrantAccess(xi->vectors.context,
+  pb->gref = (grant_ref_t)XnGrantAccess(xi->handle,
             (ULONG)(MmGetPhysicalAddress(pb->virtual).QuadPart >> PAGE_SHIFT), FALSE, INVALID_GRANT_REF, (ULONG)'XNRX');
   if (pb->gref == INVALID_GRANT_REF)
   {
@@ -84,7 +84,7 @@ put_pb_on_freelist(struct xennet_info *xi, shared_buffer_t *pb)
     //NDIS_BUFFER_LINKAGE(pb->buffer) = NULL;
     if (xi->rx_pb_free > RX_MAX_PB_FREELIST)
     {
-      xi->vectors.GntTbl_EndAccess(xi->vectors.context, pb->gref, FALSE, (ULONG)'XNRX');
+      XnEndAccess(xi->handle, pb->gref, FALSE, (ULONG)'XNRX');
       IoFreeMdl(pb->mdl);
       NdisFreeMemory(pb->virtual, PAGE_SIZE, 0);
       NdisFreeMemory(pb, sizeof(shared_buffer_t), 0);
@@ -148,12 +148,12 @@ XenNet_FillRing(struct xennet_info *xi)
   shared_buffer_t *page_buf;
   ULONG i, notify;
   ULONG batch_target;
-  RING_IDX req_prod = xi->rx.req_prod_pvt;
+  RING_IDX req_prod = xi->rx_ring.req_prod_pvt;
   netif_rx_request_t *req;
 
   //FUNCTION_ENTER();
 
-  batch_target = xi->rx_target - (req_prod - xi->rx.rsp_cons);
+  batch_target = xi->rx_target - (req_prod - xi->rx_ring.rsp_cons);
 
   if (batch_target < (xi->rx_target >> 2))
   {
@@ -175,17 +175,17 @@ XenNet_FillRing(struct xennet_info *xi)
     id = (USHORT)((req_prod + i) & (NET_RX_RING_SIZE - 1));
     NT_ASSERT(xi->rx_ring_pbs[id] == NULL);
     xi->rx_ring_pbs[id] = page_buf;
-    req = RING_GET_REQUEST(&xi->rx, req_prod + i);
+    req = RING_GET_REQUEST(&xi->rx_ring, req_prod + i);
     req->id = id;
     req->gref = page_buf->gref;
     NT_ASSERT(req->gref != INVALID_GRANT_REF);
   }
   KeMemoryBarrier();
-  xi->rx.req_prod_pvt = req_prod + i;
-  RING_PUSH_REQUESTS_AND_CHECK_NOTIFY(&xi->rx, notify);
+  xi->rx_ring.req_prod_pvt = req_prod + i;
+  RING_PUSH_REQUESTS_AND_CHECK_NOTIFY(&xi->rx_ring, notify);
   if (notify)
   {
-    xi->vectors.EvtChn_Notify(xi->vectors.context, xi->event_channel);
+    XnNotify(xi->handle, xi->event_channel);
   }
 
   //FUNCTION_EXIT();
@@ -632,17 +632,17 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
   }
 
   do {
-    prod = xi->rx.sring->rsp_prod;
+    prod = xi->rx_ring.sring->rsp_prod;
     KeMemoryBarrier(); /* Ensure we see responses up to 'prod'. */
 
-    for (cons = xi->rx.rsp_cons; cons != prod && packet_count < MAXIMUM_PACKETS_PER_INTERRUPT && packet_data < MAXIMUM_DATA_PER_INTERRUPT; cons++)
+    for (cons = xi->rx_ring.rsp_cons; cons != prod && packet_count < MAXIMUM_PACKETS_PER_INTERRUPT && packet_data < MAXIMUM_DATA_PER_INTERRUPT; cons++)
     {
       id = (USHORT)(cons & (NET_RX_RING_SIZE - 1));
       page_buf = xi->rx_ring_pbs[id];
       NT_ASSERT(page_buf);
       xi->rx_ring_pbs[id] = NULL;
       xi->rx_id_free++;
-      memcpy(&page_buf->rsp, RING_GET_RESPONSE(&xi->rx, cons), max(sizeof(struct netif_rx_response), sizeof(struct netif_extra_info)));
+      memcpy(&page_buf->rsp, RING_GET_RESPONSE(&xi->rx_ring, cons), max(sizeof(struct netif_rx_response), sizeof(struct netif_extra_info)));
       if (!extra_info_flag)
       {
         if (page_buf->rsp.status <= 0
@@ -689,7 +689,7 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
         }
       buffer_count++;
     }
-    xi->rx.rsp_cons = cons;
+    xi->rx_ring.rsp_cons = cons;
 
     /* Give netback more buffers */
     XenNet_FillRing(xi);
@@ -697,12 +697,12 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
     if (packet_count >= MAXIMUM_PACKETS_PER_INTERRUPT || packet_data >= MAXIMUM_DATA_PER_INTERRUPT)
       break;
 
-    more_to_do = RING_HAS_UNCONSUMED_RESPONSES(&xi->rx);
+    more_to_do = RING_HAS_UNCONSUMED_RESPONSES(&xi->rx_ring);
     if (!more_to_do)
     {
-      xi->rx.sring->rsp_event = xi->rx.rsp_cons + 1;
+      xi->rx_ring.sring->rsp_event = xi->rx_ring.rsp_cons + 1;
       KeMemoryBarrier();
-      more_to_do = RING_HAS_UNCONSUMED_RESPONSES(&xi->rx);
+      more_to_do = RING_HAS_UNCONSUMED_RESPONSES(&xi->rx_ring);
     }
   } while (more_to_do);
   
@@ -862,7 +862,7 @@ XenNet_BufferFree(xennet_info_t *xi)
   /* because we are shutting down this won't allocate new ones */
   while ((sb = get_pb_from_freelist(xi)) != NULL)
   {
-    xi->vectors.GntTbl_EndAccess(xi->vectors.context,
+    XnEndAccess(xi->handle,
         sb->gref, FALSE, (ULONG)'XNRX');
     IoFreeMdl(sb->mdl);
     NdisFreeMemory(sb->virtual, sizeof(shared_buffer_t), 0);

@@ -286,13 +286,16 @@ struct xennet_info
   PIO_WORKITEM power_workitem;
 
   /* Misc. Xen vars */
-  XENPCI_VECTORS vectors;
-  PXENPCI_DEVICE_STATE device_state;
+  XN_HANDLE handle;
+  //XENPCI_VECTORS vectors;
+  
+  //PXENPCI_DEVICE_STATE device_state;
   evtchn_port_t event_channel;
-  ULONG state;
-  char backend_path[MAX_XENBUS_STR_LEN];
+  //ULONG state;
+  //char backend_path[MAX_XENBUS_STR_LEN];
   ULONG backend_state;
-  PVOID config_page;
+  NDIS_EVENT backend_event;
+  //PVOID config_page;
   UCHAR multicast_list[MULTICAST_LIST_MAX_SIZE][6];
   ULONG multicast_list_size;
   KDPC suspend_dpc;
@@ -303,7 +306,9 @@ struct xennet_info
   /* tx related - protected by tx_lock */
   KSPIN_LOCK tx_lock;
   LIST_ENTRY tx_waiting_pkt_list;
-  struct netif_tx_front_ring tx;
+  netif_tx_sring_t *tx_sring;
+  grant_ref_t tx_sring_gref;
+  struct netif_tx_front_ring tx_ring;
   ULONG tx_ring_free;
   tx_shadow_t tx_shadows[NET_TX_RING_SIZE];
   //NDIS_HANDLE tx_buffer_pool;
@@ -318,7 +323,9 @@ struct xennet_info
 
   /* rx_related - protected by rx_lock */
   KSPIN_LOCK rx_lock;
-  struct netif_rx_front_ring rx;
+  netif_rx_sring_t *rx_sring;
+  grant_ref_t rx_sring_gref;
+  struct netif_rx_front_ring rx_ring;
   ULONG rx_id_free;
   packet_info_t *rxpi;
   KEVENT packet_returned_event;

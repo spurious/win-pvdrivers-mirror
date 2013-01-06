@@ -4,3 +4,28 @@ EXPORTS
 ;  DllInitialize PRIVATE
 ;  DllUnload PRIVATE
 ;  XenTestExport
+
+ XnGetVersion
+ XnOpenDevice
+ XnCloseDevice
+ XnGetValue
+
+ XnAllocateEvent
+ XnFreeEvent
+ XnBindEvent
+ XnUnBindEvent
+ XnNotify
+
+ XnAllocateGrant
+ XnFreeGrant
+ XnGrantAccess
+ XnEndAccess
+
+; XnAddWatch
+; XnRemoveWatch
+ XnReadString
+ XnWriteString
+ XnReadInt32
+ XnWriteInt32
+ XnReadInt64
+ XnWriteInt64

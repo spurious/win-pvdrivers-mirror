@@ -42,14 +42,14 @@ static __forceinline struct netif_tx_request *
 XenNet_PutCbOnRing(struct xennet_info *xi, PVOID coalesce_buf, ULONG length, grant_ref_t gref)
 {
   struct netif_tx_request *tx;
-  tx = RING_GET_REQUEST(&xi->tx, xi->tx.req_prod_pvt);
-  xi->tx.req_prod_pvt++;
+  tx = RING_GET_REQUEST(&xi->tx_ring, xi->tx_ring.req_prod_pvt);
+  xi->tx_ring.req_prod_pvt++;
   xi->tx_ring_free--;
   tx->id = get_id_from_freelist(xi);
   NT_ASSERT(xi->tx_shadows[tx->id].gref == INVALID_GRANT_REF);
   NT_ASSERT(!xi->tx_shadows[tx->id].cb);
   xi->tx_shadows[tx->id].cb = coalesce_buf;
-  tx->gref = xi->vectors.GntTbl_GrantAccess(xi->vectors.context, (ULONG)(MmGetPhysicalAddress(coalesce_buf).QuadPart >> PAGE_SHIFT), FALSE, gref, (ULONG)'XNTX');
+  tx->gref = XnGrantAccess(xi->handle, (ULONG)(MmGetPhysicalAddress(coalesce_buf).QuadPart >> PAGE_SHIFT), FALSE, gref, (ULONG)'XNTX');
   xi->tx_shadows[tx->id].gref = tx->gref;
   tx->offset = 0;
   tx->size = (USHORT)length;
@@ -85,7 +85,7 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER nb)
   
   //FUNCTION_ENTER();
 
-  gref = xi->vectors.GntTbl_GetRef(xi->vectors.context, (ULONG)'XNTX');
+  gref = XnAllocateGrant(xi->handle, (ULONG)'XNTX');
   if (gref == INVALID_GRANT_REF)
   {
     FUNCTION_MSG("out of grefs\n");
@@ -94,7 +94,7 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER nb)
   coalesce_buf = NdisAllocateFromNPagedLookasideList(&xi->tx_lookaside_list);
   if (!coalesce_buf)
   {
-    xi->vectors.GntTbl_PutRef(xi->vectors.context, gref, (ULONG)'XNTX');
+    XnFreeGrant(xi->handle, gref, (ULONG)'XNTX');
     FUNCTION_MSG("out of memory\n");
     return FALSE;
   }
@@ -142,9 +142,9 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER nb)
   /* if we have enough space on the ring then we have enough id's so no need to check for that */
   if (xi->tx_ring_free < frags + 1)
   {
-    xi->vectors.GntTbl_PutRef(xi->vectors.context, gref, (ULONG)'XNTX');
+    XnFreeGrant(xi->handle, gref, (ULONG)'XNTX');
     NdisFreeToNPagedLookasideList(&xi->tx_lookaside_list, coalesce_buf);
-    //KdPrint((__DRIVER_NAME "     Full on send - ring full\n"));
+    FUNCTION_MSG("Full on send - ring full\n");
     return FALSE;
   }
   XenNet_ParsePacketHeader(&pi, coalesce_buf, PAGE_SIZE);
@@ -284,9 +284,9 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER nb)
   if (xen_gso)
   {
     NT_ASSERT(flags & NETTXF_extra_info);
-    ei = (struct netif_extra_info *)RING_GET_REQUEST(&xi->tx, xi->tx.req_prod_pvt);
-    //KdPrint((__DRIVER_NAME "     pos = %d\n", xi->tx.req_prod_pvt));
-    xi->tx.req_prod_pvt++;
+    ei = (struct netif_extra_info *)RING_GET_REQUEST(&xi->tx_ring, xi->tx_ring.req_prod_pvt);
+    //KdPrint((__DRIVER_NAME "     pos = %d\n", xi->tx_ring.req_prod_pvt));
+    xi->tx_ring.req_prod_pvt++;
     xi->tx_ring_free--;
     ei->type = XEN_NETIF_EXTRA_TYPE_GSO;
     ei->flags = 0;
@@ -311,7 +311,7 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER nb)
       PVOID va;
       if (!coalesce_buf)
       {
-        gref = xi->vectors.GntTbl_GetRef(xi->vectors.context, (ULONG)'XNTX');
+        gref = XnAllocateGrant(xi->handle, (ULONG)'XNTX');
         if (gref == INVALID_GRANT_REF)
         {
           KdPrint((__DRIVER_NAME "     out of grefs - partial send\n"));
@@ -320,7 +320,7 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER nb)
         coalesce_buf = NdisAllocateFromNPagedLookasideList(&xi->tx_lookaside_list);
         if (!coalesce_buf)
         {
-          xi->vectors.GntTbl_PutRef(xi->vectors.context, gref, (ULONG)'XNTX');
+          XnFreeGrant(xi->handle, gref, (ULONG)'XNTX');
           KdPrint((__DRIVER_NAME "     out of memory - partial send\n"));
           break;
         }
@@ -366,21 +366,21 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER nb)
     {
       ULONG offset;
       
-      gref = xi->vectors.GntTbl_GetRef(xi->vectors.context, (ULONG)'XNTX');
+      gref = XnAllocateGrant(xi->handle, (ULONG)'XNTX');
       if (gref == INVALID_GRANT_REF)
       {
         KdPrint((__DRIVER_NAME "     out of grefs - partial send\n"));
         break;
       }
-      txN = RING_GET_REQUEST(&xi->tx, xi->tx.req_prod_pvt);
-      xi->tx.req_prod_pvt++;
+      txN = RING_GET_REQUEST(&xi->tx_ring, xi->tx_ring.req_prod_pvt);
+      xi->tx_ring.req_prod_pvt++;
       xi->tx_ring_free--;
       txN->id = get_id_from_freelist(xi);
       NT_ASSERT(!xi->tx_shadows[txN->id].cb);
       offset = MmGetMdlByteOffset(pi.curr_mdl) + pi.curr_mdl_offset;
       pfn = MmGetMdlPfnArray(pi.curr_mdl)[offset >> PAGE_SHIFT];
       txN->offset = (USHORT)offset & (PAGE_SIZE - 1);
-      txN->gref = xi->vectors.GntTbl_GrantAccess(xi->vectors.context, (ULONG)pfn, FALSE, gref, (ULONG)'XNTX');
+      txN->gref = XnGrantAccess(xi->handle, (ULONG)pfn, FALSE, gref, (ULONG)'XNTX');
       NT_ASSERT(xi->tx_shadows[txN->id].gref == INVALID_GRANT_REF);
       xi->tx_shadows[txN->id].gref = txN->gref;
       //ASSERT(sg->Elements[sg_element].Length > sg_offset);
@@ -413,7 +413,7 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER nb)
   //FUNCTION_EXIT();
   xi->tx_outstanding++;
 //total_sent++;
-//FUNCTION_MSG("sent packet\n");
+  //FUNCTION_MSG("sent packet\n");
   return TRUE;
 }
 
@@ -428,26 +428,25 @@ XenNet_SendQueuedPackets(struct xennet_info *xi)
   //FUNCTION_ENTER();
 
   NT_ASSERT(!KeTestSpinLock(&xi->tx_lock));
+#if 0
   if (xi->device_state->suspend_resume_state_pdo != SR_STATE_RUNNING)
     return;
+#endif
 
-  while (!IsListEmpty(&xi->tx_waiting_pkt_list))
-  {
+  while (!IsListEmpty(&xi->tx_waiting_pkt_list)) {
     nb_entry = RemoveHeadList(&xi->tx_waiting_pkt_list);
     nb = CONTAINING_RECORD(nb_entry, NET_BUFFER, NB_LIST_ENTRY_FIELD);
     
-    if (!XenNet_HWSendPacket(xi, nb))
-    {
+    if (!XenNet_HWSendPacket(xi, nb)) {
       //KdPrint((__DRIVER_NAME "     No room for packet\n"));
       InsertHeadList(&xi->tx_waiting_pkt_list, nb_entry);
       break;
     }
   }
 
-  RING_PUSH_REQUESTS_AND_CHECK_NOTIFY(&xi->tx, notify);
-  if (notify)
-  {
-    xi->vectors.EvtChn_Notify(xi->vectors.context, xi->event_channel);
+  RING_PUSH_REQUESTS_AND_CHECK_NOTIFY(&xi->tx_ring, notify);
+  if (notify) {
+    XnNotify(xi->handle, xi->event_channel);
   }
   //FUNCTION_EXIT();
 }
@@ -481,34 +480,30 @@ XenNet_TxBufferGC(struct xennet_info *xi, BOOLEAN dont_set_event)
   }
 
   do {
-    prod = xi->tx.sring->rsp_prod;
+    prod = xi->tx_ring.sring->rsp_prod;
     KeMemoryBarrier(); /* Ensure we see responses up to 'rsp_prod'. */
 
-    for (cons = xi->tx.rsp_cons; cons != prod; cons++)
+    for (cons = xi->tx_ring.rsp_cons; cons != prod; cons++)
     {
       struct netif_tx_response *txrsp;
       tx_shadow_t *shadow;
       
-      txrsp = RING_GET_RESPONSE(&xi->tx, cons);
+      txrsp = RING_GET_RESPONSE(&xi->tx_ring, cons);
       
       xi->tx_ring_free++;
       
-      if (txrsp->status == NETIF_RSP_NULL)
-      {
+      if (txrsp->status == NETIF_RSP_NULL) {
         continue;
       }
 
       shadow = &xi->tx_shadows[txrsp->id];
-      if (shadow->cb)
-      {
+      if (shadow->cb) {
         NdisFreeToNPagedLookasideList(&xi->tx_lookaside_list, shadow->cb);
         shadow->cb = NULL;
       }
       
-      if (shadow->gref != INVALID_GRANT_REF)
-      {
-        xi->vectors.GntTbl_EndAccess(xi->vectors.context,
-          shadow->gref, FALSE, (ULONG)'XNTX');
+      if (shadow->gref != INVALID_GRANT_REF) {
+        XnEndAccess(xi->handle, shadow->gref, FALSE, (ULONG)'XNTX');
         shadow->gref = INVALID_GRANT_REF;
       }
       
@@ -565,12 +560,12 @@ XenNet_TxBufferGC(struct xennet_info *xi, BOOLEAN dont_set_event)
       put_id_on_freelist(xi, txrsp->id);
     }
 
-    xi->tx.rsp_cons = prod;
+    xi->tx_ring.rsp_cons = prod;
     /* resist the temptation to set the event more than +1... it breaks things */
     if (!dont_set_event)
-      xi->tx.sring->rsp_event = prod + 1;
+      xi->tx_ring.sring->rsp_event = prod + 1;
     KeMemoryBarrier();
-  } while (prod != xi->tx.sring->rsp_prod);
+  } while (prod != xi->tx_ring.sring->rsp_prod);
 
   /* if queued packets, send them now */
   if (!xi->tx_shutting_down)
@@ -589,6 +584,7 @@ XenNet_TxBufferGC(struct xennet_info *xi, BOOLEAN dont_set_event)
     KeSetEvent(&xi->tx_idle_event, IO_NO_INCREMENT, FALSE);
   KeReleaseSpinLockFromDpcLevel(&xi->tx_lock);
 
+#if 0
   if (xi->device_state->suspend_resume_state_pdo == SR_STATE_SUSPENDING
     && xi->device_state->suspend_resume_state_fdo != SR_STATE_SUSPENDING
     && xi->tx_id_free == NET_TX_RING_SIZE)
@@ -596,9 +592,9 @@ XenNet_TxBufferGC(struct xennet_info *xi, BOOLEAN dont_set_event)
     KdPrint((__DRIVER_NAME "     Setting SR_STATE_SUSPENDING\n"));
     xi->device_state->suspend_resume_state_fdo = SR_STATE_SUSPENDING;
     KdPrint((__DRIVER_NAME "     Notifying event channel %d\n", xi->device_state->pdo_event_channel));
-    xi->vectors.EvtChn_Notify(xi->vectors.context, xi->device_state->pdo_event_channel);
+    XnNotify(xi->handle, xi->device_state->pdo_event_channel);
   }
-
+#endif
   //FUNCTION_EXIT();
 }
 
@@ -752,8 +748,7 @@ XenNet_TxInit(xennet_info_t *xi)
     PAGE_SIZE, XENNET_POOL_TAG, 0);
 
   xi->tx_id_free = 0;
-  for (i = 0; i < NET_TX_RING_SIZE; i++)
-  {
+  for (i = 0; i < NET_TX_RING_SIZE; i++) {
     xi->tx_shadows[i].gref = INVALID_GRANT_REF;
     xi->tx_shadows[i].cb = NULL;
     put_id_on_freelist(xi, i);

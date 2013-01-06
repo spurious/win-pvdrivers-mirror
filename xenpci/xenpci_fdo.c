@@ -554,7 +554,9 @@ XenPci_SuspendResume(WDFWORKITEM workitem)
     while ((status = WdfChildListRetrieveNextDevice(child_list, &child_iterator, &child_device, NULL)) == STATUS_SUCCESS)
     {
       KdPrint((__DRIVER_NAME "     Suspending child\n"));
+#if 0
       XenPci_Pdo_Suspend(child_device);
+#endif
     }
     WdfChildListEndIteration(child_list, &child_iterator);
 
@@ -571,7 +573,9 @@ XenPci_SuspendResume(WDFWORKITEM workitem)
     while ((status = WdfChildListRetrieveNextDevice(child_list, &child_iterator, &child_device, NULL)) == STATUS_SUCCESS)
     {
       KdPrint((__DRIVER_NAME "     Resuming child\n"));
+#if 0
       XenPci_Pdo_Resume(child_device);
+#endif
     }
     WdfChildListEndIteration(child_list, &child_iterator);
 

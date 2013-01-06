@@ -235,7 +235,7 @@ EvtChn_EvtInterruptDisable(WDFINTERRUPT interrupt, WDFDEVICE device)
 }
 
 NTSTATUS
-EvtChn_Bind(PVOID Context, evtchn_port_t Port, PXEN_EVTCHN_SERVICE_ROUTINE ServiceRoutine, PVOID ServiceContext, ULONG flags)
+EvtChn_Bind(PVOID Context, evtchn_port_t Port, PXN_EVENT_CALLBACK ServiceRoutine, PVOID ServiceContext, ULONG flags)
 {
   PXENPCI_DEVICE_DATA xpdd = Context;
   ev_action_t *action = &xpdd->ev_actions[Port];
@@ -263,7 +263,7 @@ EvtChn_Bind(PVOID Context, evtchn_port_t Port, PXEN_EVTCHN_SERVICE_ROUTINE Servi
 }
 
 NTSTATUS
-EvtChn_BindDpc(PVOID Context, evtchn_port_t Port, PXEN_EVTCHN_SERVICE_ROUTINE ServiceRoutine, PVOID ServiceContext, ULONG flags)
+EvtChn_BindDpc(PVOID Context, evtchn_port_t Port, PXN_EVENT_CALLBACK ServiceRoutine, PVOID ServiceContext, ULONG flags)
 {
   PXENPCI_DEVICE_DATA xpdd = Context;
   ev_action_t *action = &xpdd->ev_actions[Port];

@@ -126,28 +126,27 @@ typedef enum {
 /* if this is ever increased to more than 1 then we need a way of tracking it properly */
 #define DUMP_MODE_UNALIGNED_PAGES 1 /* only for unaligned buffer use */
 
+#define VBD_STATUS_INITIALISING 0
+#define VBD_STATUS_INACTIVE     1
+#define VBD_STATUS_ACTIVE       2
+
 struct
 {
-  BOOLEAN inactive;
-  
+  ULONG vbd_status;
+  STOR_DPC dpc;
   blkif_shadow_t shadows[MAX_SHADOW_ENTRIES];
   USHORT shadow_free_list[MAX_SHADOW_ENTRIES];
   USHORT shadow_free;
   USHORT shadow_min_free;
   ULONG grant_tag;
-
-  PUCHAR device_base;
-
-  blkif_sring_t *sring;
+  PDEVICE_OBJECT pdo;
+  XN_HANDLE handle;
   evtchn_port_t event_channel;
-  ULONG *event_channel_ptr;
-  union {
-    blkif_front_ring_t ring;
-    blkif_other_front_ring_t other_ring;
-  };
-  int ring_detect_state;
-  BOOLEAN use_other;
-  BOOLEAN cached_use_other;
+  blkif_front_ring_t ring;
+  blkif_sring_t *sring;
+  grant_ref_t sring_gref; 
+  ULONG backend_state;
+  ULONG frontend_state;
   UCHAR last_sense_key;
   UCHAR last_additional_sense_code;
   blkif_response_t tmp_rep;
@@ -156,8 +155,9 @@ struct
   ULONG bytes_per_sector; /* 512 for disk, 2048 for CDROM) */
   ULONG hw_bytes_per_sector; /* underlying hardware format, eg 4K */
   ULONGLONG total_sectors;
-  XENPCI_VECTORS vectors;
-  PXENPCI_DEVICE_STATE device_state;
+  ULONG feature_flush_cache;
+  ULONG feature_discard;
+  ULONG feature_barrier;
   LIST_ENTRY srb_list;
   BOOLEAN aligned_buffer_in_use;
   ULONG aligned_buffer_size;

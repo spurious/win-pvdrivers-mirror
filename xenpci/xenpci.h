@@ -85,7 +85,7 @@ extern USHORT xen_version_major;
 extern USHORT xen_version_minor;
 
 typedef struct _ev_action_t {
-  PXEN_EVTCHN_SERVICE_ROUTINE ServiceRoutine;
+  PXN_EVENT_CALLBACK ServiceRoutine;
   PVOID ServiceContext;
   CHAR description[128];
   ULONG type; /* EVT_ACTION_TYPE_* */
@@ -108,7 +108,7 @@ typedef struct xsd_sockmsg xsd_sockmsg_t;
 
 typedef struct _XENBUS_WATCH_ENTRY {
   char Path[128];
-  PXENBUS_WATCH_CALLBACK ServiceRoutine;
+  PXN_WATCH_CALLBACK ServiceRoutine;
   PVOID ServiceContext;
   int Count;
   int Active;
@@ -257,6 +257,8 @@ typedef struct {
   domid_t backend_id;
   KEVENT backend_state_event;
   ULONG backend_state;
+  PXN_BACKEND_STATE_CALLBACK backend_state_callback;
+  PVOID backend_state_callback_context;
   FAST_MUTEX backend_state_mutex;
   ULONG frontend_state;
   PMDL config_page_mdl;
@@ -266,7 +268,7 @@ typedef struct {
   PUCHAR requested_resources_ptr;
   PUCHAR assigned_resources_start;
   PUCHAR assigned_resources_ptr;
-  XENPCI_DEVICE_STATE device_state;
+  //XENPCI_DEVICE_STATE device_state;
   BOOLEAN restart_on_resume;
   BOOLEAN backend_initiated_remove;
   BOOLEAN do_not_enumerate;
@@ -327,6 +329,11 @@ typedef struct {
 } XENPCI_DEVICE_INTERFACE_DATA, *PXENPCI_DEVICE_INTERFACE_DATA;
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(XENPCI_DEVICE_INTERFACE_DATA, GetXpdid)
+
+static __inline VOID
+XenPci_FreeMem(PVOID Ptr) {
+  ExFreePoolWithTag(Ptr, XENPCI_POOL_TAG);
+}
 
 NTSTATUS
 XenBus_DeviceFileInit(WDFDEVICE device, PWDF_IO_QUEUE_CONFIG queue_config, WDFFILEOBJECT file_object);
@@ -410,9 +417,9 @@ XenBus_EndTransaction(PVOID Context, xenbus_transaction_t t, int abort, int *ret
 char *
 XenBus_List(PVOID Context, xenbus_transaction_t xbt, char *prefix, char ***contents);
 char *
-XenBus_AddWatch(PVOID Context, xenbus_transaction_t xbt, char *Path, PXENBUS_WATCH_CALLBACK ServiceRoutine, PVOID ServiceContext);
+XenBus_AddWatch(PVOID Context, xenbus_transaction_t xbt, char *Path, PXN_WATCH_CALLBACK ServiceRoutine, PVOID ServiceContext);
 char *
-XenBus_RemWatch(PVOID Context, xenbus_transaction_t xbt, char *Path, PXENBUS_WATCH_CALLBACK ServiceRoutine, PVOID ServiceContext);
+XenBus_RemWatch(PVOID Context, xenbus_transaction_t xbt, char *Path, PXN_WATCH_CALLBACK ServiceRoutine, PVOID ServiceContext);
 //VOID
 //XenBus_ThreadProc(PVOID StartContext);
 NTSTATUS
@@ -443,9 +450,9 @@ EvtChn_Mask(PVOID Context, evtchn_port_t Port);
 NTSTATUS
 EvtChn_Unmask(PVOID Context, evtchn_port_t Port);
 NTSTATUS
-EvtChn_Bind(PVOID Context, evtchn_port_t Port, PXEN_EVTCHN_SERVICE_ROUTINE ServiceRoutine, PVOID ServiceContext, ULONG flags);
+EvtChn_Bind(PVOID Context, evtchn_port_t Port, PXN_EVENT_CALLBACK ServiceRoutine, PVOID ServiceContext, ULONG flags);
 NTSTATUS
-EvtChn_BindDpc(PVOID Context, evtchn_port_t Port, PXEN_EVTCHN_SERVICE_ROUTINE ServiceRoutine, PVOID ServiceContext, ULONG flags);
+EvtChn_BindDpc(PVOID Context, evtchn_port_t Port, PXN_EVENT_CALLBACK ServiceRoutine, PVOID ServiceContext, ULONG flags);
 NTSTATUS
 EvtChn_BindIrq(PVOID Context, evtchn_port_t Port, ULONG vector, PCHAR description, ULONG flags);
 evtchn_port_t

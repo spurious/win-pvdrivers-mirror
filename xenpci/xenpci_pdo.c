@@ -63,6 +63,7 @@ XenPci_ReadBackendState(PXENPCI_PDO_DEVICE_DATA xppdd)
   }
 }
 
+#if 0
 static NTSTATUS
 XenPciPdo_ReconfigureCompletionRoutine(
   PDEVICE_OBJECT device_object,
@@ -77,6 +78,7 @@ XenPciPdo_ReconfigureCompletionRoutine(
   }
   return STATUS_MORE_PROCESSING_REQUIRED;
 }
+#endif
 
 static VOID
 XenPci_UpdateBackendState(PVOID context)
@@ -172,7 +174,7 @@ XenPci_BackendStateHandler(char *path, PVOID context)
 }
 
 static NTSTATUS
-XenPci_GetBackendAndAddWatch(WDFDEVICE device)
+XenPci_GetBackendDetails(WDFDEVICE device)
 {
   PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
   PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
@@ -205,281 +207,14 @@ XenPci_GetBackendAndAddWatch(WDFDEVICE device)
   }
   xppdd->backend_id = (domid_t)atoi(value);
   XenPci_FreeMem(value);
-
+#if 0
   /* Add watch on backend state */
   RtlStringCbPrintfA(path, ARRAY_SIZE(path), "%s/state", xppdd->backend_path);
   XenBus_AddWatch(xpdd, XBT_NIL, path, XenPci_BackendStateHandler, device);
+#endif
 
   FUNCTION_EXIT();  
   return STATUS_SUCCESS;
-}
-
-static NTSTATUS
-XenConfig_InitConfigPage(WDFDEVICE device)
-{
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  //PXENCONFIG_DEVICE_DATA xcdd = (PXENCONFIG_DEVICE_DATA)device_object->DeviceExtension;
-  //PXENPCI_PDO_DEVICE_DATA xppdd = (PXENPCI_PDO_DEVICE_DATA)device_object->DeviceExtension;
-  //PXENPCI_DEVICE_DATA xpdd = xppdd->bus_fdo->DeviceExtension;
-  PUCHAR ptr;
-  PDEVICE_OBJECT curr, prev;
-  PDRIVER_OBJECT fdo_driver_object;
-  PUCHAR fdo_driver_extension;
-  
-  FUNCTION_ENTER();
-  
-  ptr = MmGetMdlVirtualAddress(xppdd->config_page_mdl);
-  curr = IoGetAttachedDeviceReference(WdfDeviceWdmGetDeviceObject(device));
-  //curr = WdfDeviceWdmGetAttachedDevice(device);
-  while (curr != NULL)
-  {
-    fdo_driver_object = curr->DriverObject;
-    KdPrint((__DRIVER_NAME "     fdo_driver_object = %p\n", fdo_driver_object));
-    if (fdo_driver_object)
-    {
-      fdo_driver_extension = IoGetDriverObjectExtension(fdo_driver_object, UlongToPtr(XEN_INIT_DRIVER_EXTENSION_MAGIC));
-      KdPrint((__DRIVER_NAME "     fdo_driver_extension = %p\n", fdo_driver_extension));
-      if (fdo_driver_extension)
-      {
-        memcpy(ptr, fdo_driver_extension, PAGE_SIZE);
-        ObDereferenceObject(curr);
-        break;
-      }
-    }
-    prev = curr;
-    curr = IoGetLowerDeviceObject(curr);
-    ObDereferenceObject(prev);
-  }
-  
-  FUNCTION_EXIT();
-  
-  return STATUS_SUCCESS;
-}
-
-static NTSTATUS
-XenPci_EvtChn_Bind(PVOID context, evtchn_port_t Port, PXEN_EVTCHN_SERVICE_ROUTINE ServiceRoutine, PVOID ServiceContext)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  
-  return EvtChn_Bind(xpdd, Port, ServiceRoutine, ServiceContext, EVT_ACTION_FLAGS_DEFAULT);
-}
-
-static NTSTATUS
-XenPci_EvtChn_BindDpc(PVOID context, evtchn_port_t Port, PXEN_EVTCHN_SERVICE_ROUTINE ServiceRoutine, PVOID ServiceContext)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  
-  return EvtChn_BindDpc(xpdd, Port, ServiceRoutine, ServiceContext, EVT_ACTION_FLAGS_DEFAULT);
-}
-
-static NTSTATUS
-XenPci_EvtChn_Unbind(PVOID context, evtchn_port_t Port)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  
-  return EvtChn_Unbind(xpdd, Port);
-}
-
-static NTSTATUS
-XenPci_EvtChn_Mask(PVOID context, evtchn_port_t Port)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  
-  return EvtChn_Mask(xpdd, Port);
-}
-
-static NTSTATUS
-XenPci_EvtChn_Unmask(PVOID context, evtchn_port_t Port)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  
-  return EvtChn_Unmask(xpdd, Port);
-}
-
-static NTSTATUS
-XenPci_EvtChn_Notify(PVOID context, evtchn_port_t Port)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  
-  return EvtChn_Notify(xpdd, Port);
-}
-
-static BOOLEAN
-XenPci_EvtChn_AckEvent(PVOID context, evtchn_port_t port, BOOLEAN *last_interrupt)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  
-  return EvtChn_AckEvent(xpdd, port, last_interrupt);
-}
-
-typedef struct {
-  PXEN_EVTCHN_SYNC_ROUTINE sync_routine;
-  PVOID sync_context;
-} sync_context_t;
-
-static BOOLEAN
-XenPci_EvtChn_Sync_Routine(WDFINTERRUPT interrupt, WDFCONTEXT context)
-{
-  sync_context_t *wdf_sync_context = context;
-  UNREFERENCED_PARAMETER(interrupt);
-  return wdf_sync_context->sync_routine(wdf_sync_context->sync_context);
-}
-
-static BOOLEAN
-XenPci_EvtChn_Sync(PVOID context, PXEN_EVTCHN_SYNC_ROUTINE sync_routine, PVOID sync_context)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  sync_context_t wdf_sync_context;
-  
-  wdf_sync_context.sync_routine = sync_routine;
-  wdf_sync_context.sync_context = sync_context;
-  
-  return WdfInterruptSynchronize(xpdd->interrupt, XenPci_EvtChn_Sync_Routine, &wdf_sync_context);
-}
-
-static grant_ref_t
-XenPci_GntTbl_GrantAccess(PVOID context, uint32_t frame, int readonly, grant_ref_t ref, ULONG tag)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  
-  return GntTbl_GrantAccess(xpdd, xppdd->backend_id, frame, readonly, ref, tag);
-}
-
-static BOOLEAN
-XenPci_GntTbl_EndAccess(PVOID context, grant_ref_t ref, BOOLEAN keepref, ULONG tag)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  
-  return GntTbl_EndAccess(xpdd, ref, keepref, tag);
-}
-
-static VOID
-XenPci_GntTbl_PutRef(PVOID context, grant_ref_t ref, ULONG tag)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  
-  GntTbl_PutRef(xpdd, ref, tag);
-}
-
-static grant_ref_t
-XenPci_GntTbl_GetRef(PVOID context, ULONG tag)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  
-  return GntTbl_GetRef(xpdd, tag);
-}
-
-PCHAR
-XenPci_XenBus_Read(PVOID context, xenbus_transaction_t xbt, char *path, char **value)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  return XenBus_Read(xpdd, xbt, path, value);
-}
-
-PCHAR
-XenPci_XenBus_Write(PVOID context, xenbus_transaction_t xbt, char *path, char *value)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  return XenBus_Write(xpdd, xbt, path, value);
-}
-
-PCHAR
-XenPci_XenBus_Printf(PVOID context, xenbus_transaction_t xbt, char *path, char *fmt, ...)
-{
-  //PXENPCI_PDO_DEVICE_DATA xppdd = Context;
-  //PXENPCI_DEVICE_DATA xpdd = xppdd->bus_fdo->DeviceExtension;
-  //return XenBus_Printf(xpdd, xbt, path, value);
-  UNREFERENCED_PARAMETER(context);
-  UNREFERENCED_PARAMETER(xbt);
-  UNREFERENCED_PARAMETER(path);
-  UNREFERENCED_PARAMETER(fmt);
-  return NULL;
-}
-
-PCHAR
-XenPci_XenBus_StartTransaction(PVOID context, xenbus_transaction_t *xbt)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  return XenBus_StartTransaction(xpdd, xbt);
-}
-
-PCHAR
-XenPci_XenBus_EndTransaction(PVOID context, xenbus_transaction_t xbt, int abort, int *retry)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  return XenBus_EndTransaction(xpdd, xbt, abort, retry);
-}
-
-PCHAR
-XenPci_XenBus_List(PVOID context, xenbus_transaction_t xbt, char *prefix, char ***contents)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  return XenBus_List(xpdd, xbt, prefix, contents);
-}
-
-PCHAR
-XenPci_XenBus_AddWatch(PVOID context, xenbus_transaction_t xbt, char *path, PXENBUS_WATCH_CALLBACK ServiceRoutine, PVOID ServiceContext)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  PCHAR retval;
-  
-  FUNCTION_ENTER();
-  retval = XenBus_AddWatch(xpdd, xbt, path, ServiceRoutine, ServiceContext);
-  if (retval == NULL)
-  {
-    KdPrint((__DRIVER_NAME "     XenPci_XenBus_AddWatch - %s = NULL\n", path));
-  }
-  else
-  {
-    KdPrint((__DRIVER_NAME "     XenPci_XenBus_AddWatch - %s = %s\n", path, retval));
-  }
-  FUNCTION_EXIT();
-  return retval;
-}
-
-PCHAR
-XenPci_XenBus_RemWatch(PVOID context, xenbus_transaction_t xbt, char *path, PXENBUS_WATCH_CALLBACK ServiceRoutine, PVOID ServiceContext)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  return XenBus_RemWatch(xpdd, xbt, path, ServiceRoutine, ServiceContext);
 }
 
 /*
@@ -527,6 +262,7 @@ XenPci_ChangeFrontendState(WDFDEVICE device, ULONG frontend_state_set, ULONG bac
   return STATUS_SUCCESS;
 }
 
+#if 0
 static NTSTATUS
 XenPci_ChangeFrontendStateMap(WDFDEVICE device, PXENPCI_STATE_MAP_ELEMENT map)
 {
@@ -611,7 +347,9 @@ struct dummy_sring {
     RING_IDX rsp_prod, rsp_event;
     uint8_t  pad[48];
 };
+#endif
 
+#if 0
 static NTSTATUS
 XenPci_XenConfigDeviceSpecifyBuffers(WDFDEVICE device, PUCHAR src, PUCHAR dst)
 {
@@ -924,6 +662,7 @@ XenPci_XenConfigDevice(WDFDEVICE device)
   
   return status;
 }
+#endif
 
 static NTSTATUS
 XenPciPdo_EvtDeviceWdmIrpPreprocess_START_DEVICE(WDFDEVICE device, PIRP irp)
@@ -1116,7 +855,7 @@ XenPciPdo_EvtDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previous_sta
     break;  
   }
 
-  status = XenPci_GetBackendAndAddWatch(device);
+  status = XenPci_GetBackendDetails(device);
   if (!NT_SUCCESS(status))
   {
     WdfDeviceSetFailed(device, WdfDeviceFailedNoRestart);
@@ -1126,13 +865,16 @@ XenPciPdo_EvtDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previous_sta
 
   if (previous_state == WdfPowerDeviceD3 || previous_state == WdfPowerDeviceD3Final)
   {
+#if 0
     xppdd->requested_resources_ptr = xppdd->requested_resources_start;
     xppdd->assigned_resources_start = xppdd->assigned_resources_ptr = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, XENPCI_POOL_TAG);
     XenConfig_InitConfigPage(device);
     status = XenPci_XenConfigDevice(device);
+#endif
   }
   else if (previous_state == WdfPowerDevicePrepareForHibernation)
   {
+#if 0
     PVOID src, dst;
     
     ADD_XEN_INIT_REQ(&xppdd->requested_resources_ptr, XEN_INIT_TYPE_END, NULL, NULL, NULL);
@@ -1146,6 +888,7 @@ XenPciPdo_EvtDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previous_sta
 
     MmUnmapIoSpace(dst, xppdd->config_page_length);
     ExFreePoolWithTag(src, XENPCI_POOL_TAG);
+#endif
   }
 
   if (!NT_SUCCESS(status))
@@ -1213,7 +956,9 @@ XenPciPdo_EvtDeviceD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE target_state)
   }
   else
   {
+#if 0
     status = XenPci_XenShutdownDevice(device);
+#endif
   }
   
   /* Remove watch on backend state */
@@ -1319,7 +1064,7 @@ XenPci_EvtChildListCreateDevice(WDFCHILDLIST child_list,
   DECLARE_UNICODE_STRING_SIZE(buffer, 512);
   DECLARE_CONST_UNICODE_STRING(location, L"Xen Bus");
   PXENPCI_PDO_DEVICE_DATA xppdd;
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(WdfChildListGetDevice(child_list));
+  //PXENPCI_DEVICE_DATA xpdd = GetXpdd(WdfChildListGetDevice(child_list));
   WDF_PDO_EVENT_CALLBACKS pdo_callbacks;
   WDF_PNPPOWER_EVENT_CALLBACKS child_pnp_power_callbacks;
   UCHAR pnp_minor_functions[] = { IRP_MN_START_DEVICE };
@@ -1406,11 +1151,13 @@ XenPci_EvtChildListCreateDevice(WDFCHILDLIST child_list,
 
   xppdd->config_page_mdl = AllocateUncachedPage();
 
+#if 0
   xppdd->device_state.magic = XEN_DEVICE_STATE_MAGIC;
   xppdd->device_state.length = sizeof(XENPCI_DEVICE_STATE);
   xppdd->device_state.suspend_resume_state_pdo = SR_STATE_RUNNING;
   xppdd->device_state.suspend_resume_state_fdo = SR_STATE_RUNNING;
   xppdd->device_state.pdo_event_channel = xpdd->pdo_event_channel;
+#endif
   WdfDeviceSetSpecialFileSupport(child_device, WdfSpecialFilePaging, TRUE);
   WdfDeviceSetSpecialFileSupport(child_device, WdfSpecialFileHibernation, TRUE);
   WdfDeviceSetSpecialFileSupport(child_device, WdfSpecialFileDump, TRUE);
@@ -1453,6 +1200,7 @@ XenPci_EvtChildListCreateDevice(WDFCHILDLIST child_list,
   return status;
 }
 
+#if 0
 static __forceinline VOID
 XenPci_Pdo_ChangeSuspendState(WDFDEVICE device, ULONG new_state)
 {
@@ -1556,7 +1304,7 @@ XenPci_Pdo_Resume(WDFDEVICE device)
 
   if (xppdd->restart_on_resume)
   {  
-    status = XenPci_GetBackendAndAddWatch(device);
+    status = XenPci_GetBackendDetails(device);
   
     if (XenPci_ChangeFrontendState(device, XenbusStateInitialising, XenbusStateInitWait, 30000) != STATUS_SUCCESS)
     {
@@ -1595,3 +1343,4 @@ XenPci_Pdo_Resume(WDFDEVICE device)
 
   return STATUS_SUCCESS;
 }
+#endif

@@ -75,6 +75,7 @@ static void XenDbgPrint(PCHAR string, ULONG length)
   LARGE_INTEGER current_time;
   //KIRQL old_irql = 0;
 
+  /* make sure that each print gets to complete in its entirety */
   while(InterlockedCompareExchange(&debug_print_lock, 1, 0) == 1)
     KeStallExecutionProcessor(1);
 
