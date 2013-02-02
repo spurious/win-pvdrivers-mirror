@@ -216,8 +216,6 @@ typedef struct _hook_info {
 } hook_info_t;
 #endif
 
-#if (NTDDI_VERSION < NTDDI_VISTA)
-#ifndef _AMD64_ // can't patch IDT on AMD64 unfortunately - results in bug check 0x109
 static VOID
 XenPci_HookDbgPrint_High(PVOID context)
 {
@@ -258,8 +256,6 @@ XenPci_UnHookDbgPrint_High(PVOID context)
   idt_entry->addr_32_63 = (ULONG)((ULONG_PTR)Int2dHandlerOld >> 32);
   #endif
 }
-#endif
-#endif
 
 NTSTATUS
 XenPci_HookDbgPrint()
@@ -304,6 +300,24 @@ XenPci_HookDbgPrint()
   return status;
 }
 
+/* always hook IDT in dump mode - patchguard is turned off so its okay */
+/* no need for unhook routine - system is already crashed */
+/* only for AMD64 and >= Vista */
+VOID
+XenPci_DumpModeHookDebugPrint() {
+  #if (NTDDI_VERSION >= NTDDI_VISTA)
+  #ifdef _AMD64_
+  #pragma warning(suppress:28138)
+  if (READ_PORT_USHORT(XEN_IOPORT_MAGIC) == 0x49d2
+    #pragma warning(suppress:28138)
+    || READ_PORT_USHORT(XEN_IOPORT_MAGIC) == 0xd249) {
+    //XenPci_HighSync(XenPci_HookDbgPrint_High, XenPci_HookDbgPrint_High, NULL);
+    XenPci_HookDbgPrint_High(NULL);
+  }
+  #endif
+  #endif
+}
+
 NTSTATUS
 XenPci_UnHookDbgPrint()
 {
@@ -312,8 +326,7 @@ XenPci_UnHookDbgPrint()
   #pragma warning(suppress:28138)
   if (READ_PORT_USHORT(XEN_IOPORT_MAGIC) == 0x49d2
     #pragma warning(suppress:28138)
-    || READ_PORT_USHORT(XEN_IOPORT_MAGIC) == 0xd249)
-  {
+    || READ_PORT_USHORT(XEN_IOPORT_MAGIC) == 0xd249) {
     //#pragma warning(suppress:4055)
     //DbgSetDebugPrintCallback = (PDBG_SET_DEBUGPRINT_CALLBACK)MmGetSystemRoutineAddress((PUNICODE_STRING)&DbgSetDebugPrintCallbackName);
 #if (NTDDI_VERSION >= NTDDI_VISTA)
@@ -331,14 +344,11 @@ XenPci_UnHookDbgPrint()
     XenPci_HighSync(XenPci_UnHookDbgPrint_High, XenPci_UnHookDbgPrint_High, NULL);
 #endif
 #endif
-  }
-  else
-  {
+  } else {
     status = STATUS_UNSUCCESSFUL;
   }
   
-  if (!KeDeregisterBugCheckCallback(&callback_record))
-  {
+  if (!KeDeregisterBugCheckCallback(&callback_record)) {
     KdPrint((__DRIVER_NAME "     KeDeregisterBugCheckCallback failed\n"));
     status = STATUS_UNSUCCESSFUL;
   }

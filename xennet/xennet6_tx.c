@@ -140,11 +140,10 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER nb)
   }
 
   /* if we have enough space on the ring then we have enough id's so no need to check for that */
-  if (xi->tx_ring_free < frags + 1)
-  {
+  if (xi->tx_ring_free < frags + 1) {
     XnFreeGrant(xi->handle, gref, (ULONG)'XNTX');
     NdisFreeToNPagedLookasideList(&xi->tx_lookaside_list, coalesce_buf);
-    FUNCTION_MSG("Full on send - ring full\n");
+    //FUNCTION_MSG("Full on send - ring full\n");
     return FALSE;
   }
   XenNet_ParsePacketHeader(&pi, coalesce_buf, PAGE_SIZE);
@@ -427,11 +426,8 @@ XenNet_SendQueuedPackets(struct xennet_info *xi)
 
   //FUNCTION_ENTER();
 
-  NT_ASSERT(!KeTestSpinLock(&xi->tx_lock));
-#if 0
-  if (xi->device_state->suspend_resume_state_pdo != SR_STATE_RUNNING)
+  if (xi->device_state != DEVICE_STATE_ACTIVE)
     return;
-#endif
 
   while (!IsListEmpty(&xi->tx_waiting_pkt_list)) {
     nb_entry = RemoveHeadList(&xi->tx_waiting_pkt_list);
@@ -464,15 +460,12 @@ XenNet_TxBufferGC(struct xennet_info *xi, BOOLEAN dont_set_event)
 
   //FUNCTION_ENTER();
 
-  if (!xi->connected)
-    return; /* a delayed DPC could let this come through... just do nothing */
   NT_ASSERT(KeGetCurrentIrql() == DISPATCH_LEVEL);
 
   KeAcquireSpinLockAtDpcLevel(&xi->tx_lock);
 
 //  InitializeListHead(&nbl_head);
-  if (xi->tx_shutting_down && !xi->tx_outstanding)
-  {
+  if (xi->device_state != DEVICE_STATE_ACTIVE && !xi->tx_outstanding) {
     /* there is a chance that our Dpc had been queued just before the shutdown... */
     KeSetEvent(&xi->tx_idle_event, IO_NO_INCREMENT, FALSE);
     KeReleaseSpinLockFromDpcLevel(&xi->tx_lock);
@@ -568,8 +561,7 @@ XenNet_TxBufferGC(struct xennet_info *xi, BOOLEAN dont_set_event)
   } while (prod != xi->tx_ring.sring->rsp_prod);
 
   /* if queued packets, send them now */
-  if (!xi->tx_shutting_down)
-    XenNet_SendQueuedPackets(xi);
+  XenNet_SendQueuedPackets(xi);
 
   KeReleaseSpinLockFromDpcLevel(&xi->tx_lock);
 
@@ -580,21 +572,11 @@ XenNet_TxBufferGC(struct xennet_info *xi, BOOLEAN dont_set_event)
   /* must be done after we have truly given back all packets */
   KeAcquireSpinLockAtDpcLevel(&xi->tx_lock);
   xi->tx_outstanding -= tx_packets;
-  if (!xi->tx_outstanding && xi->tx_shutting_down)
+  if (xi->device_state != DEVICE_STATE_ACTIVE && !xi->tx_outstanding) {
     KeSetEvent(&xi->tx_idle_event, IO_NO_INCREMENT, FALSE);
+  }
   KeReleaseSpinLockFromDpcLevel(&xi->tx_lock);
 
-#if 0
-  if (xi->device_state->suspend_resume_state_pdo == SR_STATE_SUSPENDING
-    && xi->device_state->suspend_resume_state_fdo != SR_STATE_SUSPENDING
-    && xi->tx_id_free == NET_TX_RING_SIZE)
-  {
-    KdPrint((__DRIVER_NAME "     Setting SR_STATE_SUSPENDING\n"));
-    xi->device_state->suspend_resume_state_fdo = SR_STATE_SUSPENDING;
-    KdPrint((__DRIVER_NAME "     Notifying event channel %d\n", xi->device_state->pdo_event_channel));
-    XnNotify(xi->handle, xi->device_state->pdo_event_channel);
-  }
-#endif
   //FUNCTION_EXIT();
 }
 
@@ -615,11 +597,9 @@ XenNet_SendNetBufferLists(
   UNREFERENCED_PARAMETER(port_number);
   //FUNCTION_ENTER();
 
-  if (xi->inactive)
-  {
+  if (xi->device_state == DEVICE_STATE_INACTIVE) {
     curr_nbl = nb_lists;
-    for (curr_nbl = nb_lists; curr_nbl; curr_nbl = NET_BUFFER_LIST_NEXT_NBL(curr_nbl))
-    {
+    for (curr_nbl = nb_lists; curr_nbl; curr_nbl = NET_BUFFER_LIST_NEXT_NBL(curr_nbl)) {
       //KdPrint((__DRIVER_NAME "     NBL %p\n", curr_nbl));
       curr_nbl->Status = NDIS_STATUS_FAILURE;
     }
@@ -704,31 +684,16 @@ XenNet_CancelSend(NDIS_HANDLE adapter_context, PVOID cancel_id)
   FUNCTION_EXIT();
 }
 
+#if 0
 VOID
-XenNet_TxResumeStart(xennet_info_t *xi)
-{
+XenNet_TxStartPre(xennet_info_t *xi) {
   UNREFERENCED_PARAMETER(xi);
 
   FUNCTION_ENTER();
   /* nothing to do here - all packets were already sent */
   FUNCTION_EXIT();
 }
-
-VOID
-XenNet_TxResumeEnd(xennet_info_t *xi)
-{
-  KIRQL old_irql;
-
-  FUNCTION_ENTER();
-
-  UNREFERENCED_PARAMETER(xi);
-
-  KeAcquireSpinLock(&xi->tx_lock, &old_irql);
-  //XenNet_SendQueuedPackets(xi);
-  KeReleaseSpinLock(&xi->tx_lock, old_irql);
-
-  FUNCTION_EXIT();
-}
+#endif
 
 BOOLEAN
 XenNet_TxInit(xennet_info_t *xi)
@@ -740,7 +705,6 @@ XenNet_TxInit(xennet_info_t *xi)
   InitializeListHead(&xi->tx_waiting_pkt_list);
 
   KeInitializeEvent(&xi->tx_idle_event, SynchronizationEvent, FALSE);
-  xi->tx_shutting_down = FALSE;
   xi->tx_outstanding = 0;
   xi->tx_ring_free = NET_TX_RING_SIZE;
   
@@ -765,40 +729,32 @@ on our freelists and harvest anything left on the rings.
 BOOLEAN
 XenNet_TxShutdown(xennet_info_t *xi)
 {
-  //PLIST_ENTRY entry;
-  //PNDIS_PACKET packet;
-  ////PMDL mdl;
-  ////ULONG i;
-  KIRQL old_irql;
   PNET_BUFFER nb;
   PNET_BUFFER_LIST nbl;
   PLIST_ENTRY nb_entry;
   LARGE_INTEGER timeout;
+  KIRQL old_irql;
 
   FUNCTION_ENTER();
 
   KeAcquireSpinLock(&xi->tx_lock, &old_irql);
-  xi->tx_shutting_down = TRUE;
-  KeReleaseSpinLock(&xi->tx_lock, old_irql);
 
-  while (xi->tx_outstanding)
-  {
+  while (xi->tx_outstanding) {
+    KeReleaseSpinLock(&xi->tx_lock, old_irql);
     KdPrint((__DRIVER_NAME "     Waiting for %d remaining packets to be sent\n", xi->tx_outstanding));
     timeout.QuadPart = -1 * 1 * 1000 * 1000 * 10; /* 1 second */
     KeWaitForSingleObject(&xi->tx_idle_event, Executive, KernelMode, FALSE, &timeout);
+    KeAcquireSpinLock(&xi->tx_lock, &old_irql);
   }
-
-  KeFlushQueuedDpcs();
+  KeReleaseSpinLock(&xi->tx_lock, old_irql);
 
   /* Free packets in tx queue */
-  while (!IsListEmpty(&xi->tx_waiting_pkt_list))
-  {
+  while (!IsListEmpty(&xi->tx_waiting_pkt_list)) {
     nb_entry = RemoveHeadList(&xi->tx_waiting_pkt_list);
     nb = CONTAINING_RECORD(nb_entry, NET_BUFFER, NB_LIST_ENTRY_FIELD);
     nbl = NB_NBL(nb);
     NBL_REF(nbl)--;
-    if (!NBL_REF(nbl))
-    {
+    if (!NBL_REF(nbl)) {
       nbl->Status = NDIS_STATUS_FAILURE;
       NdisMSendNetBufferListsComplete(xi->adapter_handle, nbl, NDIS_SEND_COMPLETE_FLAGS_DISPATCH_LEVEL);
     }

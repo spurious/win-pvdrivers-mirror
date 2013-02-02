@@ -29,6 +29,7 @@ static IO_WORKITEM_ROUTINE XenNet_ResumeWorkItem;
 //static KDEFERRED_ROUTINE XenNet_SuspendResume;
 static KDEFERRED_ROUTINE XenNet_RxTxDpc;
 #endif
+static VOID XenNet_DeviceCallback(PVOID context, ULONG callback_type, PVOID value);
 
 #pragma NDIS_INIT_FUNCTION(DriverEntry)
 
@@ -36,322 +37,6 @@ NDIS_HANDLE driver_handle = NULL;
 
 USHORT ndis_os_major_version = 0;
 USHORT ndis_os_minor_version = 0;
-
-#if 0
-/* ----- BEGIN Other people's code --------- */
-/* from linux/include/linux/ctype.h, used under GPLv2 */
-#define _U      0x01    /* upper */
-#define _L      0x02    /* lower */
-#define _D      0x04    /* digit */
-#define _C      0x08    /* cntrl */
-#define _P      0x10    /* punct */
-#define _S      0x20    /* white space (space/lf/tab) */
-#define _X      0x40    /* hex digit */
-#define _SP     0x80    /* hard space (0x20) */
-
-/* from linux/include/lib/ctype.c, used under GPLv2 */
-unsigned char _ctype[] = {
-_C,_C,_C,_C,_C,_C,_C,_C,                        /* 0-7 */
-_C,_C|_S,_C|_S,_C|_S,_C|_S,_C|_S,_C,_C,         /* 8-15 */
-_C,_C,_C,_C,_C,_C,_C,_C,                        /* 16-23 */
-_C,_C,_C,_C,_C,_C,_C,_C,                        /* 24-31 */
-_S|_SP,_P,_P,_P,_P,_P,_P,_P,                    /* 32-39 */
-_P,_P,_P,_P,_P,_P,_P,_P,                        /* 40-47 */
-_D,_D,_D,_D,_D,_D,_D,_D,                        /* 48-55 */
-_D,_D,_P,_P,_P,_P,_P,_P,                        /* 56-63 */
-_P,_U|_X,_U|_X,_U|_X,_U|_X,_U|_X,_U|_X,_U,      /* 64-71 */
-_U,_U,_U,_U,_U,_U,_U,_U,                        /* 72-79 */
-_U,_U,_U,_U,_U,_U,_U,_U,                        /* 80-87 */
-_U,_U,_U,_P,_P,_P,_P,_P,                        /* 88-95 */
-_P,_L|_X,_L|_X,_L|_X,_L|_X,_L|_X,_L|_X,_L,      /* 96-103 */
-_L,_L,_L,_L,_L,_L,_L,_L,                        /* 104-111 */
-_L,_L,_L,_L,_L,_L,_L,_L,                        /* 112-119 */
-_L,_L,_L,_P,_P,_P,_P,_C,                        /* 120-127 */
-0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,                /* 128-143 */
-0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,                /* 144-159 */
-_S|_SP,_P,_P,_P,_P,_P,_P,_P,_P,_P,_P,_P,_P,_P,_P,_P,   /* 160-175 */
-_P,_P,_P,_P,_P,_P,_P,_P,_P,_P,_P,_P,_P,_P,_P,_P,       /* 176-191 */
-_U,_U,_U,_U,_U,_U,_U,_U,_U,_U,_U,_U,_U,_U,_U,_U,       /* 192-207 */
-_U,_U,_U,_U,_U,_U,_U,_P,_U,_U,_U,_U,_U,_U,_U,_L,       /* 208-223 */
-_L,_L,_L,_L,_L,_L,_L,_L,_L,_L,_L,_L,_L,_L,_L,_L,       /* 224-239 */
-_L,_L,_L,_L,_L,_L,_L,_P,_L,_L,_L,_L,_L,_L,_L,_L};      /* 240-255 */
-
-/* from linux/include/linux/ctype.h, used under GPLv2 */
-#define __ismask(x) (_ctype[(int)(unsigned char)(x)])
-
-#define isalnum(c)      ((__ismask(c)&(_U|_L|_D)) != 0)
-#define isalpha(c)      ((__ismask(c)&(_U|_L)) != 0)
-#define iscntrl(c)      ((__ismask(c)&(_C)) != 0)
-#define isdigit(c)      ((__ismask(c)&(_D)) != 0)
-#define isgraph(c)      ((__ismask(c)&(_P|_U|_L|_D)) != 0)
-#define islower(c)      ((__ismask(c)&(_L)) != 0)
-#define isprint(c)      ((__ismask(c)&(_P|_U|_L|_D|_SP)) != 0)
-#define ispunct(c)      ((__ismask(c)&(_P)) != 0)
-#define isspace(c)      ((__ismask(c)&(_S)) != 0)
-#define isupper(c)      ((__ismask(c)&(_U)) != 0)
-#define isxdigit(c)     ((__ismask(c)&(_D|_X)) != 0)
-
-#define TOLOWER(x) ((x) | 0x20)
-
-/* from linux/lib/vsprintf.c, used under GPLv2 */
-/* Copyright (C) 1991, 1992  Linus Torvalds
- * Wirzenius wrote this portably, Torvalds fucked it up :-)
- */
-/**
- * simple_strtoul - convert a string to an unsigned long
- * @cp: The start of the string
- * @endp: A pointer to the end of the parsed string will be placed here
- * @base: The number base to use
- */
-unsigned long simple_strtoul(const char *cp,char **endp,unsigned int base)
-{
-  unsigned long result = 0,value;
-
-  if (!base) {
-    base = 10;
-    if (*cp == '0') {
-      base = 8;
-      cp++;
-      if ((TOLOWER(*cp) == 'x') && isxdigit(cp[1])) {
-        cp++;
-        base = 16;
-      }
-    }
-  } else if (base == 16) {
-    if (cp[0] == '0' && TOLOWER(cp[1]) == 'x')
-      cp += 2;
-  }
-  while (isxdigit(*cp) &&
-    (value = isdigit(*cp) ? *cp-'0' : TOLOWER(*cp)-'a'+10) < base) {
-    result = result*base + value;
-    cp++;
-  }
-  if (endp)
-    *endp = (char *)cp;
-  return result;
-}
-/* end vsprintf.c code */
-/* ----- END Other people's code --------- */
-#endif
-
-#if 0
-static NDIS_STATUS
-XenNet_ConnectBackend(struct xennet_info *xi)
-{
-  PUCHAR ptr;
-  UCHAR type;
-  PCHAR setting, value, value2;
-  UINT i;
-
-  FUNCTION_ENTER();
-  
-  NT_ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
-
-  xi->backend_csum_supported = TRUE; /* just assume this */
-  xi->backend_gso_value = 0;
-  xi->backend_sg_supported = FALSE;
-  
-  ptr = xi->config_page;
-  while((type = GET_XEN_INIT_RSP(&ptr, (PVOID)&setting, (PVOID)&value, (PVOID)&value2)) != XEN_INIT_TYPE_END)
-  {
-    switch(type)
-    {
-    case XEN_INIT_TYPE_RING: /* frontend ring */
-      KdPrint((__DRIVER_NAME "     XEN_INIT_TYPE_RING - %s = %p\n", setting, value));
-      if (strcmp(setting, "tx-ring-ref") == 0)
-      {
-        FRONT_RING_INIT(&xi->tx, (netif_tx_sring_t *)value, PAGE_SIZE);
-      } else if (strcmp(setting, "rx-ring-ref") == 0)
-      {
-        FRONT_RING_INIT(&xi->rx, (netif_rx_sring_t *)value, PAGE_SIZE);
-      }
-      break;
-    case XEN_INIT_TYPE_EVENT_CHANNEL: /* frontend event channel */
-      KdPrint((__DRIVER_NAME "     XEN_INIT_TYPE_EVENT_CHANNEL - %s = %d\n", setting, PtrToUlong(value)));
-      if (strcmp(setting, "event-channel") == 0)
-      {
-        xi->event_channel = PtrToUlong(value);
-      }
-      break;
-    case XEN_INIT_TYPE_READ_STRING_FRONT:
-      break;
-    case XEN_INIT_TYPE_READ_STRING_BACK:
-      state = 0;
-      octet = 0;
-      for (i = 0; i < strlen(value); i++) {
-        if (octet >= 6)
-          state = 4;
-        switch(state) {
-        case 0:
-        case 1:
-          if (value[i] >= 0 && value[i] <= 9) {
-            xi->perm_mac_addr[octet] = (value[i] - '0') << ((1 - state) * 4);
-            state++;
-          } else if (value[i] >= 'A' && value[i] <= 'F') {
-            xi->perm_mac_addr[octet] = (value[i] - 'A' + 10) << ((1 - state) * 4);
-            state++;
-          } else if (value[i] >= 'a' && value[i] <= 'f') {
-            xi->perm_mac_addr[octet] = (value[i] - 'a' + 10) << ((1 - state) * 4);
-            state++;
-          } else {
-            state = 4;
-          }
-          break;
-            
-      if (strcmp(setting, "mac") == 0)
-      {
-        char *s, *e;
-        s = value;
-        for (i = 0; i < ETH_ALEN; i++) {
-          xi->perm_mac_addr[i] = (uint8_t)simple_strtoul(s, &e, 16);
-          if ((s == e) || (*e != ((i == ETH_ALEN-1) ? '\0' : ':'))) {
-            KdPrint((__DRIVER_NAME "Error parsing MAC address\n"));
-          }
-          s = e + 1;
-        }
-        if ((xi->curr_mac_addr[0] & 0x03) != 0x02)
-        {
-          /* only copy if curr_mac_addr is not a LUA */
-          memcpy(xi->curr_mac_addr, xi->perm_mac_addr, ETH_ALEN);
-        }
-      }
-      else if (strcmp(setting, "feature-sg") == 0)
-      {
-        if (atoi(value))
-        {
-          xi->backend_sg_supported = TRUE;
-        }
-      }
-      else if (strcmp(setting, "feature-gso-tcpv4") == 0)
-      {
-        if (atoi(value))
-        {
-          xi->backend_gso_value = xi->frontend_gso_value;
-        }
-      }
-      break;
-    case XEN_INIT_TYPE_VECTORS:
-      KdPrint((__DRIVER_NAME "     XEN_INIT_TYPE_VECTORS\n"));
-      if (((PXENPCI_VECTORS)value)->length != sizeof(XENPCI_VECTORS) ||
-        ((PXENPCI_VECTORS)value)->magic != XEN_DATA_MAGIC)
-      {
-        KdPrint((__DRIVER_NAME "     vectors mismatch (magic = %08x, length = %d)\n",
-          ((PXENPCI_VECTORS)value)->magic, ((PXENPCI_VECTORS)value)->length));
-        FUNCTION_EXIT();
-        return NDIS_STATUS_ADAPTER_NOT_FOUND;
-      }
-      else
-        memcpy(&xi->vectors, value, sizeof(XENPCI_VECTORS));
-      break;
-    case XEN_INIT_TYPE_STATE_PTR:
-      KdPrint((__DRIVER_NAME "     XEN_INIT_TYPE_DEVICE_STATE - %p\n", PtrToUlong(value)));
-      xi->device_state = (PXENPCI_DEVICE_STATE)value;
-      break;
-    default:
-      KdPrint((__DRIVER_NAME "     XEN_INIT_TYPE_%d\n", type));
-      break;
-    }
-  }
-  if (!xi->backend_sg_supported)
-    xi->backend_gso_value = min(xi->backend_gso_value, PAGE_SIZE - MAX_PKT_HEADER_LENGTH);
-
-  xi->current_sg_supported = xi->frontend_sg_supported && xi->backend_sg_supported;
-  xi->current_csum_supported = xi->frontend_csum_supported && xi->backend_csum_supported;
-  xi->current_gso_value = min(xi->backend_gso_value, xi->backend_gso_value);
-  xi->current_mtu_value = xi->frontend_mtu_value;
-  xi->current_gso_rx_split_type = xi->frontend_gso_rx_split_type;
-    
-  FUNCTION_EXIT();
-  
-  return NDIS_STATUS_SUCCESS;
-} /* XenNet_ConnectBackend */
-#endif
-
-#if 0
-static VOID
-XenNet_ResumeWorkItem(PDEVICE_OBJECT device_object, PVOID context)
-{
-  struct xennet_info *xi = context;
-  KIRQL old_irql;
-  
-  UNREFERENCED_PARAMETER(device_object);
-  
-  FUNCTION_ENTER();
-
-  NT_ASSERT(xi->resume_work_item);
-
-  IoFreeWorkItem(xi->resume_work_item);
-  
-  XenNet_TxResumeStart(xi);
-  XenNet_RxResumeStart(xi);
-  XenNet_ConnectBackend(xi);
-  XenNet_RxResumeEnd(xi);
-  XenNet_TxResumeEnd(xi);
-
-  KeAcquireSpinLock(&xi->resume_lock, &old_irql);
-  xi->resume_work_item = NULL;
-  KdPrint((__DRIVER_NAME "     *Setting suspend_resume_state_fdo = %d\n", xi->device_state->suspend_resume_state_pdo));
-  xi->device_state->suspend_resume_state_fdo = xi->device_state->suspend_resume_state_pdo;
-  KdPrint((__DRIVER_NAME "     *Notifying event channel %d\n", xi->device_state->pdo_event_channel));
-  xi->vectors.EvtChn_Notify(xi->vectors.context, xi->device_state->pdo_event_channel);
-  KeReleaseSpinLock(&xi->resume_lock, old_irql);
-
-  FUNCTION_EXIT();
-}
-
-static VOID
-XenNet_SuspendResume(PKDPC dpc, PVOID context, PVOID arg1, PVOID arg2)
-{
-  struct xennet_info *xi = context;
-  KIRQL old_irql;
-  PIO_WORKITEM resume_work_item;
-
-  UNREFERENCED_PARAMETER(dpc);
-  UNREFERENCED_PARAMETER(arg1);
-  UNREFERENCED_PARAMETER(arg2);
-
-  FUNCTION_ENTER();
-  
-  switch (xi->device_state->suspend_resume_state_pdo)
-  {
-  case SR_STATE_SUSPENDING:
-    KdPrint((__DRIVER_NAME "     New state SUSPENDING\n"));
-    KeAcquireSpinLock(&xi->rx_lock, &old_irql);
-    if (xi->rx_id_free == NET_RX_RING_SIZE)
-    {  
-      xi->device_state->suspend_resume_state_fdo = SR_STATE_SUSPENDING;
-      KdPrint((__DRIVER_NAME "     Notifying event channel %d\n", xi->device_state->pdo_event_channel));
-      xi->vectors.EvtChn_Notify(xi->vectors.context, xi->device_state->pdo_event_channel);
-    }
-    KeReleaseSpinLock(&xi->rx_lock, old_irql);
-    break;
-  case SR_STATE_RESUMING:
-    KdPrint((__DRIVER_NAME "     New state SR_STATE_RESUMING\n"));
-    /* do it like this so we don't race and double-free the work item */
-    resume_work_item = IoAllocateWorkItem(xi->fdo);
-    KeAcquireSpinLock(&xi->resume_lock, &old_irql);
-    if (xi->resume_work_item || xi->device_state->suspend_resume_state_fdo == SR_STATE_RESUMING)
-    {
-      KeReleaseSpinLock(&xi->resume_lock, old_irql);
-      IoFreeWorkItem(resume_work_item);
-      return;
-    }
-    xi->resume_work_item = resume_work_item;
-    KeReleaseSpinLock(&xi->resume_lock, old_irql);
-    IoQueueWorkItem(xi->resume_work_item, XenNet_ResumeWorkItem, DelayedWorkQueue, xi);
-    break;
-  default:
-    KdPrint((__DRIVER_NAME "     New state %d\n", xi->device_state->suspend_resume_state_fdo));
-    xi->device_state->suspend_resume_state_fdo = xi->device_state->suspend_resume_state_pdo;
-    KdPrint((__DRIVER_NAME "     Notifying event channel %d\n", xi->device_state->pdo_event_channel));
-    xi->vectors.EvtChn_Notify(xi->vectors.context, xi->device_state->pdo_event_channel);
-    break;
-  }
-  KeMemoryBarrier();
-  
-  FUNCTION_EXIT();
-}
-#endif
 
 static VOID
 XenNet_RxTxDpc(PKDPC dpc, PVOID context, PVOID arg1, PVOID arg2)
@@ -377,33 +62,228 @@ XenNet_HandleEvent_DIRQL(PVOID context)
   //ULONG suspend_resume_state_pdo;
   
   //FUNCTION_ENTER();
-#if 0
-  suspend_resume_state_pdo = xi->device_state->suspend_resume_state_pdo;
-  KeMemoryBarrier();
-
-  if (!xi->shutting_down && suspend_resume_state_pdo != xi->device_state->suspend_resume_state_fdo) {
-    KeInsertQueueDpc(&xi->suspend_dpc, NULL, NULL);
-  }
-  if (xi->connected && !xi->inactive && suspend_resume_state_pdo != SR_STATE_RESUMING) {
-#endif
-  if (xi->connected && !xi->inactive) {
+  if (xi->device_state == DEVICE_STATE_ACTIVE || xi->device_state == DEVICE_STATE_DISCONNECTING) {
     KeInsertQueueDpc(&xi->rxtx_dpc, NULL, NULL);
   }
   //FUNCTION_EXIT();
   return TRUE;
 }
 
-XenNet_BackendStateCallback(PVOID context, ULONG state) {
+static NTSTATUS
+XenNet_Connect(PVOID context, BOOLEAN suspend) {
+  NTSTATUS status;
+  struct xennet_info *xi = context;
+  PFN_NUMBER pfn;
+  ULONG qemu_hide_filter;
+  ULONG qemu_hide_flags_value;
+  int i;
+  ULONG state;
+  ULONG octet;
+  PCHAR tmp_string;
+  ULONG tmp_ulong;
+
+  if (!suspend) {
+    xi->handle = XnOpenDevice(xi->pdo, XenNet_DeviceCallback, xi);
+  }
+  if (!xi->handle) {
+    FUNCTION_MSG("Cannot open Xen device\n");
+    return STATUS_UNSUCCESSFUL;
+  }
+  XnGetValue(xi->handle, XN_VALUE_TYPE_QEMU_HIDE_FLAGS, &qemu_hide_flags_value);
+  XnGetValue(xi->handle, XN_VALUE_TYPE_QEMU_FILTER, &qemu_hide_filter);
+  if (!(qemu_hide_flags_value & QEMU_UNPLUG_ALL_NICS) || qemu_hide_filter) {
+    FUNCTION_MSG("inactive\n");
+    xi->device_state = DEVICE_STATE_INACTIVE;
+    XnCloseDevice(xi->handle);
+    return STATUS_SUCCESS;
+  }
+
+  for (i = 0; i <= 5 && xi->backend_state != XenbusStateInitialising && xi->backend_state != XenbusStateInitWait && xi->backend_state != XenbusStateInitialised; i++) {
+    FUNCTION_MSG("Waiting for XenbusStateInitXxx\n");
+    KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, NULL);
+  }
+  if (xi->backend_state != XenbusStateInitialising && xi->backend_state != XenbusStateInitWait && xi->backend_state != XenbusStateInitialised) {
+    FUNCTION_MSG("Backend state timeout\n");
+    return STATUS_UNSUCCESSFUL;
+  }
+  if (!NT_SUCCESS(status = XnBindEvent(xi->handle, &xi->event_channel, XenNet_HandleEvent_DIRQL, xi))) {
+    FUNCTION_MSG("Cannot allocate event channel\n");
+    return STATUS_UNSUCCESSFUL;
+  }
+  FUNCTION_MSG("event_channel = %d\n", xi->event_channel);
+  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "event-channel", xi->event_channel);
+  xi->tx_sring = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, XENNET_POOL_TAG);
+  if (!xi->tx_sring) {
+    FUNCTION_MSG("Cannot allocate tx_sring\n");
+    return STATUS_UNSUCCESSFUL;
+  }
+  SHARED_RING_INIT(xi->tx_sring);
+  FRONT_RING_INIT(&xi->tx_ring, xi->tx_sring, PAGE_SIZE);
+  pfn = MmGetPhysicalAddress(xi->tx_sring).QuadPart >> PAGE_SHIFT;
+  FUNCTION_MSG("tx sring pfn = %d\n", (ULONG)pfn);
+  xi->tx_sring_gref = XnGrantAccess(xi->handle, (ULONG)pfn, FALSE, INVALID_GRANT_REF, XENNET_POOL_TAG);
+  FUNCTION_MSG("tx sring_gref = %d\n", xi->tx_sring_gref);
+  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "tx-ring-ref", xi->tx_sring_gref);  
+  xi->rx_sring = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, XENNET_POOL_TAG);
+  if (!xi->rx_sring) {
+    FUNCTION_MSG("Cannot allocate rx_sring\n");
+    return STATUS_UNSUCCESSFUL;
+  }
+  SHARED_RING_INIT(xi->rx_sring);
+  FRONT_RING_INIT(&xi->rx_ring, xi->rx_sring, PAGE_SIZE);
+  pfn = MmGetPhysicalAddress(xi->rx_sring).QuadPart >> PAGE_SHIFT;
+  FUNCTION_MSG("rx sring pfn = %d\n", (ULONG)pfn);
+  xi->rx_sring_gref = XnGrantAccess(xi->handle, (ULONG)pfn, FALSE, INVALID_GRANT_REF, XENNET_POOL_TAG);
+  FUNCTION_MSG("rx sring_gref = %d\n", xi->rx_sring_gref);
+  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "rx-ring-ref", xi->rx_sring_gref);  
+
+  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "request-rx-copy", 1);
+  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "request-rx-notify", 1);
+  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "feature-no-csum-offload", !xi->frontend_csum_supported);
+  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "feature-sg", (int)xi->frontend_sg_supported);
+  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "feature-gso-tcpv4", !!xi->frontend_gso_value);
+
+  status = XnReadInt32(xi->handle, XN_BASE_BACKEND, "feature-sg", &tmp_ulong);
+  if (tmp_ulong) {
+    xi->backend_sg_supported = TRUE;
+  }
+  status = XnReadInt32(xi->handle, XN_BASE_BACKEND, "feature-gso-tcpv4", &tmp_ulong);
+  if (tmp_ulong) {
+    xi->backend_gso_value = xi->frontend_gso_value;
+  }
+
+  status = XnReadString(xi->handle, XN_BASE_BACKEND, "mac", &tmp_string);
+  state = 0;
+  octet = 0;
+  for (i = 0; state != 3 && i < strlen(tmp_string); i++) {
+    if (octet == 6) {
+      state = 3;
+      break;
+    }
+    switch(state) {
+    case 0:
+    case 1:
+      if (tmp_string[i] >= '0' && tmp_string[i] <= '9') {
+        xi->perm_mac_addr[octet] |= (tmp_string[i] - '0') << ((1 - state) * 4);
+        state++;
+      } else if (tmp_string[i] >= 'A' && tmp_string[i] <= 'F') {
+        xi->perm_mac_addr[octet] |= (tmp_string[i] - 'A' + 10) << ((1 - state) * 4);
+        state++;
+      } else if (tmp_string[i] >= 'a' && tmp_string[i] <= 'f') {
+        xi->perm_mac_addr[octet] |= (tmp_string[i] - 'a' + 10) << ((1 - state) * 4);
+        state++;
+      } else {
+        state = 3;
+      }
+      break;
+    case 2:
+      if (tmp_string[i] == ':') {
+        octet++;
+        state = 0;
+      } else {
+        state = 3;
+      }
+      break;
+    }
+  }
+  if (octet != 5 || state != 2) {
+    FUNCTION_MSG("Failed to parse backend MAC address %s\n", tmp_string);
+    XnFreeMem(xi->handle, tmp_string);
+    return STATUS_UNSUCCESSFUL;
+  } else if ((xi->curr_mac_addr[0] & 0x03) != 0x02) {
+    /* only copy if curr_mac_addr is not a LUA */
+    memcpy(xi->curr_mac_addr, xi->perm_mac_addr, ETH_ALEN);
+  }
+  XnFreeMem(xi->handle, tmp_string);
+  FUNCTION_MSG("MAC address is %02X:%02X:%02X:%02X:%02X:%02X\n",
+    xi->curr_mac_addr[0], xi->curr_mac_addr[1], xi->curr_mac_addr[2], 
+    xi->curr_mac_addr[3], xi->curr_mac_addr[4], xi->curr_mac_addr[5]);
+
+  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "state", XenbusStateConnected);
+
+  for (i = 0; i <= 5 && xi->backend_state != XenbusStateConnected; i++) {
+    FUNCTION_MSG("Waiting for XenbusStateConnected\n");
+    KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, NULL);
+  }
+  if (xi->backend_state != XenbusStateConnected) {
+    FUNCTION_MSG("Backend state timeout\n");
+    return STATUS_UNSUCCESSFUL;
+  }
+  XenNet_TxInit(xi);
+  XenNet_RxInit(xi);
+
+  /* we don't set device_state = DEVICE_STATE_ACTIVE here - has to be done during init once ndis is ready */
+  
+  return STATUS_SUCCESS;
+}
+
+static NTSTATUS
+XenNet_Disconnect(PVOID context, BOOLEAN suspend) {
   struct xennet_info *xi = (struct xennet_info *)context;
+  PFN_NUMBER pfn;
+  NTSTATUS status;
+
+  if (xi->device_state != DEVICE_STATE_ACTIVE) {
+    FUNCTION_MSG("state not DEVICE_STATE_ACTIVE, is %d instead\n", xi->device_state);
+    FUNCTION_EXIT();
+    return STATUS_SUCCESS;
+  }
+  xi->device_state = DEVICE_STATE_DISCONNECTING;
+  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "state", XenbusStateClosing);
+  while (xi->backend_state != XenbusStateClosing && xi->backend_state != XenbusStateClosed) {
+    FUNCTION_MSG("Waiting for XenbusStateClosing/Closed\n");
+    KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, NULL);
+  }
+  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "state", XenbusStateClosed);
+  while (xi->backend_state != XenbusStateClosed) {
+    FUNCTION_MSG("Waiting for XenbusStateClosed\n");
+    KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, NULL);
+  }
+  XnUnbindEvent(xi->handle, xi->event_channel);
+  KeFlushQueuedDpcs();
+  XenNet_TxShutdown(xi);
+  XenNet_RxShutdown(xi);
+  pfn = MmGetPhysicalAddress(xi->rx_sring).QuadPart >> PAGE_SHIFT;
+  XnEndAccess(xi->handle, xi->rx_sring_gref, FALSE, XENNET_POOL_TAG);
+  ExFreePoolWithTag(xi->rx_sring, XENNET_POOL_TAG);
+  pfn = MmGetPhysicalAddress(xi->tx_sring).QuadPart >> PAGE_SHIFT;
+  XnEndAccess(xi->handle, xi->tx_sring_gref, FALSE, XENNET_POOL_TAG);
+  ExFreePoolWithTag(xi->tx_sring, XENNET_POOL_TAG);
+  if (!suspend) {
+    XnCloseDevice(xi->handle);
+  }
+  xi->device_state = DEVICE_STATE_DISCONNECTED;
+  return STATUS_SUCCESS;
+};
+
+static VOID
+XenNet_DeviceCallback(PVOID context, ULONG callback_type, PVOID value) {
+  struct xennet_info *xi = (struct xennet_info *)context;
+  ULONG state;
   
   FUNCTION_ENTER();
-  if (state == xi->backend_state) {
-    FUNCTION_MSG("same state %d\n", state);
-    FUNCTION_EXIT();
+  switch (callback_type) {
+  case XN_DEVICE_CALLBACK_BACKEND_STATE:
+    state = (ULONG)(ULONG_PTR)value;
+    if (state == xi->backend_state) {
+      FUNCTION_MSG("same state %d\n", state);
+      FUNCTION_EXIT();
+    }
+    FUNCTION_MSG("XenBusState = %d -> %d\n", xi->backend_state, state);
+    xi->backend_state = state;
+    KeSetEvent(&xi->backend_event, 0, FALSE);
+    break;
+  case XN_DEVICE_CALLBACK_SUSPEND:
+    FUNCTION_MSG("XN_DEVICE_CALLBACK_SUSPEND");
+    XenNet_Disconnect(xi, TRUE);
+    break;
+  case XN_DEVICE_CALLBACK_RESUME:
+    FUNCTION_MSG("XN_DEVICE_CALLBACK_RESUME");
+    XenNet_Connect(xi, TRUE);
+    xi->device_state = DEVICE_STATE_ACTIVE;
+    KeInsertQueueDpc(&xi->rxtx_dpc, NULL, NULL);
+    break;
   }
-  FUNCTION_MSG("XenbusState = %d -> %d\n", xi->backend_state, state);
-  xi->backend_state = state;
-  NdisSetEvent(&xi->backend_event);
   FUNCTION_EXIT();
 }
 
@@ -419,22 +299,15 @@ XenNet_Initialize(NDIS_HANDLE adapter_handle, NDIS_HANDLE driver_context, PNDIS_
   PNDIS_CONFIGURATION_PARAMETER config_param;
   //PNDIS_MINIPORT_ADAPTER_ATTRIBUTES adapter_attributes;
   ULONG i;
-  PFN_NUMBER pfn;
   ULONG length;
   PVOID network_address;
   UINT network_address_length;
-  ULONG qemu_hide_filter;
-  ULONG qemu_hide_flags_value;
   NDIS_MINIPORT_ADAPTER_REGISTRATION_ATTRIBUTES registration_attributes;
   NDIS_MINIPORT_ADAPTER_GENERAL_ATTRIBUTES general_attributes;
   NDIS_MINIPORT_ADAPTER_OFFLOAD_ATTRIBUTES offload_attributes;
   NDIS_OFFLOAD df_offload, hw_offload;
   NDIS_TCP_CONNECTION_OFFLOAD df_conn_offload, hw_conn_offload;
   static NDIS_OID *supported_oids;
-  ULONG state;
-  ULONG octet;
-  PCHAR tmp_string;
-  ULONG tmp_ulong;
 
   UNREFERENCED_PARAMETER(driver_context);
   UNREFERENCED_PARAMETER(init_parameters);
@@ -450,60 +323,10 @@ XenNet_Initialize(NDIS_HANDLE adapter_handle, NDIS_HANDLE driver_context, PNDIS_
   }
   RtlZeroMemory(xi, sizeof(*xi));
   xi->adapter_handle = adapter_handle;
-  xi->inactive = TRUE;
+  xi->device_state = DEVICE_STATE_INITIALISING;
   NdisMGetDeviceProperty(xi->adapter_handle, &xi->pdo, &xi->fdo,
     &xi->lower_do, NULL, NULL);
-  NdisInitializeEvent(&xi->backend_event);
-  xi->handle = XnOpenDevice(xi->pdo, XenNet_BackendStateCallback, xi);
-  if (!xi->handle) {
-    FUNCTION_MSG("Cannot open Xen device\n");
-    status = NDIS_STATUS_RESOURCES;
-    goto err;
-  }
-  for (i = 0; i <= 5 && xi->backend_state != XenbusStateInitialising && xi->backend_state != XenbusStateInitWait && xi->backend_state != XenbusStateInitialised; i++) {
-    NdisWaitEvent(&xi->backend_event, 1000);
-  }
-  NdisResetEvent(&xi->backend_event);
-  if (xi->backend_state != XenbusStateInitialising && xi->backend_state != XenbusStateInitWait && xi->backend_state != XenbusStateInitialised) {
-    FUNCTION_MSG("Backend state timeout\n");
-    status = NDIS_STATUS_RESOURCES;
-    goto err;
-  }
-  xi->event_channel = XnAllocateEvent(xi->handle);
-  if (!xi->event_channel) {
-    FUNCTION_MSG("Cannot allocate event channel\n");
-    status = NDIS_STATUS_RESOURCES;
-    goto err;
-  }
-  FUNCTION_MSG("event_channel = %d\n", xi->event_channel);
-  status = XnBindEvent(xi->handle, xi->event_channel, XenNet_HandleEvent_DIRQL, xi);
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "event-channel", xi->event_channel);
-  xi->tx_sring = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, XENNET_POOL_TAG);
-  if (!xi->tx_sring) {
-    FUNCTION_MSG("Cannot allocate tx_sring\n");
-    status = NDIS_STATUS_RESOURCES;
-    goto err;
-  }
-  SHARED_RING_INIT(xi->tx_sring);
-  FRONT_RING_INIT(&xi->tx_ring, xi->tx_sring, PAGE_SIZE);
-  pfn = MmGetPhysicalAddress(xi->tx_sring).QuadPart >> PAGE_SHIFT;
-  FUNCTION_MSG("tx sring pfn = %d\n", (ULONG)pfn);
-  xi->tx_sring_gref = XnGrantAccess(xi->handle, (ULONG)pfn, FALSE, INVALID_GRANT_REF, XENNET_POOL_TAG);
-  FUNCTION_MSG("tx sring_gref = %d\n", xi->tx_sring_gref);
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "tx-ring-ref", xi->tx_sring_gref);  
-  xi->rx_sring = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, XENNET_POOL_TAG);
-  if (!xi->rx_sring) {
-    FUNCTION_MSG("Cannot allocate rx_sring\n");
-    status = NDIS_STATUS_RESOURCES;
-    goto err;
-  }
-  SHARED_RING_INIT(xi->rx_sring);
-  FRONT_RING_INIT(&xi->rx_ring, xi->rx_sring, PAGE_SIZE);
-  pfn = MmGetPhysicalAddress(xi->rx_sring).QuadPart >> PAGE_SHIFT;
-  FUNCTION_MSG("rx sring pfn = %d\n", (ULONG)pfn);
-  xi->rx_sring_gref = XnGrantAccess(xi->handle, (ULONG)pfn, FALSE, INVALID_GRANT_REF, XENNET_POOL_TAG);
-  FUNCTION_MSG("rx sring_gref = %d\n", xi->rx_sring_gref);
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "rx-ring-ref", xi->rx_sring_gref);  
+  KeInitializeEvent(&xi->backend_event, SynchronizationEvent, FALSE);
 
   xi->rx_target     = RX_DFL_MIN_TARGET;
   xi->rx_min_target = RX_DFL_MIN_TARGET;
@@ -540,14 +363,7 @@ XenNet_Initialize(NDIS_HANDLE adapter_handle, NDIS_HANDLE driver_context, PNDIS_
     | NDIS_STATISTICS_GEN_STATISTICS_SUPPORTED
     | NDIS_STATISTICS_XMIT_DISCARDS_SUPPORTED;
 
-#if 0    
-  KeInitializeDpc(&xi->suspend_dpc, XenNet_SuspendResume, xi);
-  KeInitializeSpinLock(&xi->resume_lock);
-#endif
-
   KeInitializeDpc(&xi->rxtx_dpc, XenNet_RxTxDpc, xi);
-  KeSetTargetProcessorDpc(&xi->rxtx_dpc, 0);
-  KeSetImportanceDpc(&xi->rxtx_dpc, HighImportance);
 
   xi->packet_filter = 0;
 
@@ -559,13 +375,8 @@ XenNet_Initialize(NDIS_HANDLE adapter_handle, NDIS_HANDLE driver_context, PNDIS_
     goto err;
   }
 
-  XnGetValue(xi->handle, XN_VALUE_TYPE_QEMU_HIDE_FLAGS, &qemu_hide_flags_value);
-  XnGetValue(xi->handle, XN_VALUE_TYPE_QEMU_FILTER, &qemu_hide_filter);
-  if ((qemu_hide_flags_value & QEMU_UNPLUG_ALL_NICS) || qemu_hide_filter)
-    xi->inactive = FALSE;
-
-  xi->power_state = NdisDeviceStateD0;
-  xi->power_workitem = IoAllocateWorkItem(xi->fdo);
+  //xi->power_state = NdisDeviceStateD0;
+  //xi->power_workitem = IoAllocateWorkItem(xi->fdo);
 
   config_object.Header.Size = sizeof(NDIS_CONFIGURATION_OBJECT);
   config_object.Header.Type = NDIS_OBJECT_TYPE_CONFIGURATION_OBJECT;
@@ -670,81 +481,7 @@ XenNet_Initialize(NDIS_HANDLE adapter_handle, NDIS_HANDLE driver_context, PNDIS_
 
   NdisCloseConfiguration(config_handle);
 
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "request-rx-copy", 1);
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "request-rx-notify", 1);
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "feature-no-csum-offload", !xi->frontend_csum_supported);
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "feature-sg", (int)xi->frontend_sg_supported);
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "feature-gso-tcpv4", !!xi->frontend_gso_value);
-
-  status = XnReadInt32(xi->handle, XN_BASE_BACKEND, "feature-sg", &tmp_ulong);
-  if (tmp_ulong) {
-    xi->backend_sg_supported = TRUE;
-  }
-  status = XnReadInt32(xi->handle, XN_BASE_BACKEND, "feature-gso-tcpv4", &tmp_ulong);
-  if (tmp_ulong) {
-    xi->backend_gso_value = xi->frontend_gso_value;
-  }
-
-  status = XnReadString(xi->handle, XN_BASE_BACKEND, "mac", &tmp_string);
-  state = 0;
-  octet = 0;
-  for (i = 0; state != 3 && i < strlen(tmp_string); i++) {
-    if (octet == 6) {
-FUNCTION_MSG("AAA - i = %d, state = %d, octet = %d\n", i, state, octet);
-      state = 3;
-      break;
-    }
-    switch(state) {
-    case 0:
-    case 1:
-      if (tmp_string[i] >= '0' && tmp_string[i] <= '9') {
-        xi->perm_mac_addr[octet] |= (tmp_string[i] - '0') << ((1 - state) * 4);
-        state++;
-      } else if (tmp_string[i] >= 'A' && tmp_string[i] <= 'F') {
-        xi->perm_mac_addr[octet] |= (tmp_string[i] - 'A' + 10) << ((1 - state) * 4);
-        state++;
-      } else if (tmp_string[i] >= 'a' && tmp_string[i] <= 'f') {
-        xi->perm_mac_addr[octet] |= (tmp_string[i] - 'a' + 10) << ((1 - state) * 4);
-        state++;
-      } else {
-        state = 3;
-      }
-      break;
-    case 2:
-      if (tmp_string[i] == ':') {
-        octet++;
-        state = 0;
-      } else {
-        state = 3;
-      }
-      break;
-    }
-  }
-  if (octet != 5 || state != 2) {
-    FUNCTION_MSG("Failed to parse backend MAC address %s\n", tmp_string);
-    XnFreeMem(xi->handle, tmp_string);
-    status = NDIS_STATUS_FAILURE;
-    goto err;
-  } else if ((xi->curr_mac_addr[0] & 0x03) != 0x02) {
-    /* only copy if curr_mac_addr is not a LUA */
-    memcpy(xi->curr_mac_addr, xi->perm_mac_addr, ETH_ALEN);
-  }
-  XnFreeMem(xi->handle, tmp_string);
-  FUNCTION_MSG("MAC address is %02X:%02X:%02X:%02X:%02X:%02X\n",
-    xi->curr_mac_addr[0], xi->curr_mac_addr[1], xi->curr_mac_addr[2], 
-    xi->curr_mac_addr[3], xi->curr_mac_addr[4], xi->curr_mac_addr[5]);
-
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "state", XenbusStateConnected);
-
-  for (i = 0; i <= 5 && xi->backend_state != XenbusStateConnected; i++) {
-    NdisWaitEvent(&xi->backend_event, 1000);
-  }
-  NdisResetEvent(&xi->backend_event);
-  if (xi->backend_state != XenbusStateConnected) {
-    FUNCTION_MSG("Backend state timeout\n");
-    status = NDIS_STATUS_RESOURCES;
-    goto err;
-  }
+  XenNet_Connect(xi, FALSE);
 
   if (!xi->backend_sg_supported)
     xi->backend_gso_value = min(xi->backend_gso_value, PAGE_SIZE - MAX_PKT_HEADER_LENGTH);
@@ -955,9 +692,7 @@ FUNCTION_MSG("AAA - i = %d, state = %d, octet = %d\n", i, state, octet);
     //what about backfill here?
   }
   #endif
-  XenNet_TxInit(xi);
-  XenNet_RxInit(xi);
-  xi->connected = TRUE;
+  xi->device_state = DEVICE_STATE_ACTIVE;
   FUNCTION_EXIT();
   return NDIS_STATUS_SUCCESS;
   
@@ -1020,18 +755,7 @@ XenNet_Halt(NDIS_HANDLE adapter_context, NDIS_HALT_ACTION halt_action)
   UNREFERENCED_PARAMETER(halt_action);
 
   FUNCTION_ENTER();
-  
-  xi->shutting_down = TRUE;
-  KeMemoryBarrier(); /* make sure everyone sees that we are now shutting down */
-
-  XenNet_TxShutdown(xi);
-  XenNet_RxShutdown(xi);
-
-  xi->connected = FALSE;
-  KeMemoryBarrier(); /* make sure everyone sees that we are now disconnected */
-
-  //xi->vectors.XenPci_XenShutdownDevice(xi->vectors.context);
-
+  XenNet_Disconnect(xi, FALSE);
   NdisFreeMemory(xi, 0, 0);
 
   FUNCTION_EXIT();

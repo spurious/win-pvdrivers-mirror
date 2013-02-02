@@ -40,8 +40,7 @@ static KDEFERRED_ROUTINE EvtChn_DpcBounce;
 #define BITS_PER_LONG_SHIFT (5 + (sizeof(xen_ulong_t) >> 3))
 
 static VOID
-EvtChn_DpcBounce(PRKDPC Dpc, PVOID Context, PVOID SystemArgument1, PVOID SystemArgument2)
-{
+EvtChn_DpcBounce(PRKDPC Dpc, PVOID Context, PVOID SystemArgument1, PVOID SystemArgument2) {
   ev_action_t *action = Context;
 
   UNREFERENCED_PARAMETER(Dpc);
@@ -50,17 +49,16 @@ EvtChn_DpcBounce(PRKDPC Dpc, PVOID Context, PVOID SystemArgument1, PVOID SystemA
 
   //FUNCTION_ENTER();
 
-  if (action->type != EVT_ACTION_TYPE_EMPTY)
-  {
+  if (action->type != EVT_ACTION_TYPE_EMPTY) { 
     action->ServiceRoutine(action->ServiceContext);
   }
   //FUNCTION_EXIT();
 }
 
+#if 0
 /* Called at DIRQL */
 BOOLEAN
-EvtChn_AckEvent(PVOID context, evtchn_port_t port, BOOLEAN *last_interrupt)
-{
+EvtChn_AckEvent(PVOID context, evtchn_port_t port, BOOLEAN *last_interrupt) {
   PXENPCI_DEVICE_DATA xpdd = context;
   ULONG pcpu = KeGetCurrentProcessorNumber() & 0xff;
   ULONG evt_word;
@@ -84,8 +82,9 @@ EvtChn_AckEvent(PVOID context, evtchn_port_t port, BOOLEAN *last_interrupt)
   
   return (BOOLEAN)!!val;
 }
+#endif
 
-volatile ULONG in_inq = 0;
+//volatile ULONG in_inq = 0;
 
 BOOLEAN
 EvtChn_EvtInterruptIsr(WDFINTERRUPT interrupt, ULONG message_id)
@@ -111,20 +110,16 @@ to CPU != 0, but we should always use vcpu_info[0]
 
   UNREFERENCED_PARAMETER(message_id);
 
-  if (xpdd->interrupts_masked)
-  {
+  if (xpdd->interrupts_masked) {
     KdPrint((__DRIVER_NAME "     unhandled interrupt\n"));
   }
 
-  if (xpdd->hibernated)
-  {
+  if (xpdd->hibernated) {
     KdPrint((__DRIVER_NAME "     interrupt while hibernated\n"));
   }
 
-  for (i = 0; i < ARRAY_SIZE(xpdd->evtchn_pending_pvt[pcpu]); i++)
-  {
-    if (xpdd->evtchn_pending_pvt[pcpu][i])
-    {
+  for (i = 0; i < ARRAY_SIZE(xpdd->evtchn_pending_pvt[pcpu]); i++) {
+    if (xpdd->evtchn_pending_pvt[pcpu][i]) {
       KdPrint((__DRIVER_NAME "     Unacknowledged event word = %d, val = %p\n", i, xpdd->evtchn_pending_pvt[pcpu][i]));
       xpdd->evtchn_pending_pvt[pcpu][i] = 0;
     }
@@ -157,15 +152,11 @@ to CPU != 0, but we should always use vcpu_info[0]
         //KdPrint((__DRIVER_NAME "     EVT_ACTION_TYPE_NORMAL port = %d\n", port));
         ev_action->ServiceRoutine(ev_action->ServiceContext);
         break;
-      case EVT_ACTION_TYPE_IRQ:
-        //KdPrint((__DRIVER_NAME "     EVT_ACTION_TYPE_IRQ port = %d\n", port));
-        synch_set_bit(evt_bit, (volatile xen_long_t *)&xpdd->evtchn_pending_pvt[pcpu][evt_word]);
-        deferred = TRUE;
-        break;
       case EVT_ACTION_TYPE_DPC:
         //KdPrint((__DRIVER_NAME "     EVT_ACTION_TYPE_DPC port = %d\n", port));
         KeInsertQueueDpc(&ev_action->Dpc, NULL, NULL);
         break;
+#if 0
       case EVT_ACTION_TYPE_SUSPEND:
         KdPrint((__DRIVER_NAME "     EVT_ACTION_TYPE_SUSPEND\n"));
         for (i = 0; i < NR_EVENTS; i++)
@@ -174,6 +165,7 @@ to CPU != 0, but we should always use vcpu_info[0]
           {
             switch(xpdd->ev_actions[i].type)
             {
+#if 0            
             case EVT_ACTION_TYPE_IRQ:
               {
                 int suspend_bit = i & (BITS_PER_LONG - 1);
@@ -181,6 +173,7 @@ to CPU != 0, but we should always use vcpu_info[0]
                 synch_set_bit(suspend_bit, (volatile xen_long_t *)&xpdd->evtchn_pending_pvt[pcpu][suspend_word]);
               }
               break;
+#endif
             case EVT_ACTION_TYPE_NORMAL:
               if (xpdd->ev_actions[i].ServiceRoutine)
               {
@@ -196,6 +189,7 @@ to CPU != 0, but we should always use vcpu_info[0]
         KeInsertQueueDpc(&ev_action->Dpc, NULL, NULL);
         deferred = TRUE;
         break;
+#endif
       default:
         KdPrint((__DRIVER_NAME "     Unhandled Event!!! port=%d\n", port));
         break;
@@ -235,27 +229,27 @@ EvtChn_EvtInterruptDisable(WDFINTERRUPT interrupt, WDFDEVICE device)
 }
 
 NTSTATUS
-EvtChn_Bind(PVOID Context, evtchn_port_t Port, PXN_EVENT_CALLBACK ServiceRoutine, PVOID ServiceContext, ULONG flags)
+EvtChn_Bind(PVOID Context, evtchn_port_t port, PXN_EVENT_CALLBACK ServiceRoutine, PVOID ServiceContext, ULONG flags)
 {
   PXENPCI_DEVICE_DATA xpdd = Context;
-  ev_action_t *action = &xpdd->ev_actions[Port];
+  ev_action_t *action = &xpdd->ev_actions[port];
 
   FUNCTION_ENTER();
   
   if (InterlockedCompareExchange((volatile LONG *)&action->type, EVT_ACTION_TYPE_NEW, EVT_ACTION_TYPE_EMPTY) != EVT_ACTION_TYPE_EMPTY)
   {
-    KdPrint((__DRIVER_NAME " Handler for port %d already registered\n", Port));
+    KdPrint((__DRIVER_NAME " Handler for port %d already registered\n", port));
     return STATUS_UNSUCCESSFUL;
   }
 
-  xpdd->ev_actions[Port].ServiceRoutine = ServiceRoutine;
-  xpdd->ev_actions[Port].ServiceContext = ServiceContext;
-  xpdd->ev_actions[Port].xpdd = xpdd;
-  xpdd->ev_actions[Port].flags = flags;
+  xpdd->ev_actions[port].ServiceRoutine = ServiceRoutine;
+  xpdd->ev_actions[port].ServiceContext = ServiceContext;
+  xpdd->ev_actions[port].xpdd = xpdd;
+  xpdd->ev_actions[port].flags = flags;
   KeMemoryBarrier();
-  xpdd->ev_actions[Port].type = EVT_ACTION_TYPE_NORMAL;
+  xpdd->ev_actions[port].type = EVT_ACTION_TYPE_NORMAL;
 
-  EvtChn_Unmask(Context, Port);
+  EvtChn_Unmask(Context, port);
 
   FUNCTION_EXIT();
 
@@ -263,89 +257,88 @@ EvtChn_Bind(PVOID Context, evtchn_port_t Port, PXN_EVENT_CALLBACK ServiceRoutine
 }
 
 NTSTATUS
-EvtChn_BindDpc(PVOID Context, evtchn_port_t Port, PXN_EVENT_CALLBACK ServiceRoutine, PVOID ServiceContext, ULONG flags)
+EvtChn_BindDpc(PVOID Context, evtchn_port_t port, PXN_EVENT_CALLBACK ServiceRoutine, PVOID ServiceContext, ULONG flags)
 {
   PXENPCI_DEVICE_DATA xpdd = Context;
-  ev_action_t *action = &xpdd->ev_actions[Port];
+  ev_action_t *action = &xpdd->ev_actions[port];
 
   FUNCTION_ENTER();
   
   if (InterlockedCompareExchange((volatile LONG *)&action->type, EVT_ACTION_TYPE_NEW, EVT_ACTION_TYPE_EMPTY) != EVT_ACTION_TYPE_EMPTY)
   {
-    KdPrint((__DRIVER_NAME " Handler for port %d already registered\n", Port));
+    KdPrint((__DRIVER_NAME " Handler for port %d already registered\n", port));
     return STATUS_UNSUCCESSFUL;
   }
 
-  xpdd->ev_actions[Port].ServiceRoutine = ServiceRoutine;
-  xpdd->ev_actions[Port].ServiceContext = ServiceContext;
-  xpdd->ev_actions[Port].xpdd = xpdd;
-  xpdd->ev_actions[Port].flags = flags;
+  xpdd->ev_actions[port].ServiceRoutine = ServiceRoutine;
+  xpdd->ev_actions[port].ServiceContext = ServiceContext;
+  xpdd->ev_actions[port].xpdd = xpdd;
+  xpdd->ev_actions[port].flags = flags;
   KeMemoryBarrier(); // make sure that the new service routine is only called once the context is set up
   InterlockedExchange((volatile LONG *)&action->type, EVT_ACTION_TYPE_DPC);
 
-  EvtChn_Unmask(Context, Port);
+  EvtChn_Unmask(Context, port);
 
   FUNCTION_EXIT();
 
   return STATUS_SUCCESS;
 }
 
+#if 0
 NTSTATUS
-EvtChn_BindIrq(PVOID Context, evtchn_port_t Port, ULONG vector, PCHAR description, ULONG flags)
+EvtChn_BindIrq(PVOID Context, evtchn_port_t port, ULONG vector, PCHAR description, ULONG flags)
 {
   PXENPCI_DEVICE_DATA xpdd = Context;
-  ev_action_t *action = &xpdd->ev_actions[Port];
+  ev_action_t *action = &xpdd->ev_actions[port];
 
   FUNCTION_ENTER();
   
   if (InterlockedCompareExchange((volatile LONG *)&action->type, EVT_ACTION_TYPE_NEW, EVT_ACTION_TYPE_EMPTY) != EVT_ACTION_TYPE_EMPTY)
   {
-    KdPrint((__DRIVER_NAME " Handler for port %d already registered\n", Port));
+    KdPrint((__DRIVER_NAME " Handler for port %d already registered\n", port));
     return STATUS_UNSUCCESSFUL;
   }
 
-  xpdd->ev_actions[Port].vector = vector;
-  xpdd->ev_actions[Port].xpdd = xpdd;
+  xpdd->ev_actions[port].vector = vector;
+  xpdd->ev_actions[port].xpdd = xpdd;
   KeMemoryBarrier();
-  xpdd->ev_actions[Port].type = EVT_ACTION_TYPE_IRQ;
-  RtlStringCbCopyA(xpdd->ev_actions[Port].description, 128, description);
-  xpdd->ev_actions[Port].flags = flags;
+  xpdd->ev_actions[port].type = EVT_ACTION_TYPE_IRQ;
+  RtlStringCbCopyA(xpdd->ev_actions[port].description, 128, description);
+  xpdd->ev_actions[port].flags = flags;
   
-  EvtChn_Unmask(Context, Port);
+  EvtChn_Unmask(Context, port);
 
   FUNCTION_EXIT();
 
   return STATUS_SUCCESS;
 }
+#endif
 
 NTSTATUS
-EvtChn_Unbind(PVOID Context, evtchn_port_t Port)
-{
+EvtChn_Unbind(PVOID Context, evtchn_port_t port) {
   PXENPCI_DEVICE_DATA xpdd = Context;
-  ev_action_t *action = &xpdd->ev_actions[Port];
+  ev_action_t *action = &xpdd->ev_actions[port];
   int old_type;
   
-  EvtChn_Mask(Context, Port);
+  EvtChn_Mask(Context, port);
   old_type = InterlockedExchange((volatile LONG *)&action->type, EVT_ACTION_TYPE_EMPTY);
   
-  if (old_type == EVT_ACTION_TYPE_DPC || old_type == EVT_ACTION_TYPE_SUSPEND)
-  {
-    KeRemoveQueueDpc(&xpdd->ev_actions[Port].Dpc);
+  if (old_type == EVT_ACTION_TYPE_DPC) { // || old_type == EVT_ACTION_TYPE_SUSPEND) {
+    KeRemoveQueueDpc(&xpdd->ev_actions[port].Dpc);
 #if (NTDDI_VERSION >= NTDDI_WINXP)
     KeFlushQueuedDpcs();
 #endif
   }
   
   KeMemoryBarrier(); // make sure we don't call the old Service Routine with the new data...
-  xpdd->ev_actions[Port].ServiceRoutine = NULL;
-  xpdd->ev_actions[Port].ServiceContext = NULL;
+  xpdd->ev_actions[port].ServiceRoutine = NULL;
+  xpdd->ev_actions[port].ServiceContext = NULL;
 
   return STATUS_SUCCESS;
 }
 
 NTSTATUS
-EvtChn_Mask(PVOID Context, evtchn_port_t port)
-{
+EvtChn_Mask(PVOID Context, evtchn_port_t port) {
   PXENPCI_DEVICE_DATA xpdd = Context;
 
   synch_set_bit(port & (BITS_PER_LONG - 1),
@@ -354,8 +347,7 @@ EvtChn_Mask(PVOID Context, evtchn_port_t port)
 }
 
 NTSTATUS
-EvtChn_Unmask(PVOID context, evtchn_port_t port)
-{
+EvtChn_Unmask(PVOID context, evtchn_port_t port) {
   PXENPCI_DEVICE_DATA xpdd = context;
 
   synch_clear_bit(port & (BITS_PER_LONG - 1),
@@ -364,19 +356,17 @@ EvtChn_Unmask(PVOID context, evtchn_port_t port)
 }
 
 NTSTATUS
-EvtChn_Notify(PVOID Context, evtchn_port_t Port)
-{
+EvtChn_Notify(PVOID Context, evtchn_port_t port) {
   PXENPCI_DEVICE_DATA xpdd = Context;
   struct evtchn_send send;
 
-  send.port = Port;
+  send.port = port;
   (void)HYPERVISOR_event_channel_op(xpdd, EVTCHNOP_send, &send);
   return STATUS_SUCCESS;
 }
 
 evtchn_port_t
-EvtChn_AllocIpi(PVOID context, ULONG vcpu)
-{
+EvtChn_AllocIpi(PVOID context, ULONG vcpu) {
   PXENPCI_DEVICE_DATA xpdd = context;
   evtchn_bind_ipi_t op;
   
@@ -389,8 +379,7 @@ EvtChn_AllocIpi(PVOID context, ULONG vcpu)
 }
 
 evtchn_port_t
-EvtChn_AllocUnbound(PVOID Context, domid_t Domain)
-{
+EvtChn_AllocUnbound(PVOID Context, domid_t Domain) {
   PXENPCI_DEVICE_DATA xpdd = Context;
   evtchn_alloc_unbound_t op;
   op.dom = DOMID_SELF;
@@ -400,8 +389,7 @@ EvtChn_AllocUnbound(PVOID Context, domid_t Domain)
 }
 
 VOID
-EvtChn_Close(PVOID Context, evtchn_port_t port )
-{
+EvtChn_Close(PVOID Context, evtchn_port_t port) {
   PXENPCI_DEVICE_DATA xpdd = Context;
   evtchn_close_t op;
   op.port = port;
@@ -409,6 +397,7 @@ EvtChn_Close(PVOID Context, evtchn_port_t port )
   return;
 }
 
+#if 0
 VOID
 EvtChn_PdoEventChannelDpc(PVOID context)
 {
@@ -418,6 +407,7 @@ EvtChn_PdoEventChannelDpc(PVOID context)
   KeSetEvent(&xpdd->pdo_suspend_event, IO_NO_INCREMENT, FALSE);
   FUNCTION_EXIT();
 }
+#endif
 
 NTSTATUS
 EvtChn_Init(PXENPCI_DEVICE_DATA xpdd)
@@ -433,17 +423,16 @@ EvtChn_Init(PXENPCI_DEVICE_DATA xpdd)
     EvtChn_Mask(xpdd, i);
     action = &xpdd->ev_actions[i];
     action->type = EVT_ACTION_TYPE_EMPTY;
+    //action->port = -1;
     action->count = 0;
     KeInitializeDpc(&action->Dpc, EvtChn_DpcBounce, action);
   }
 
-  for (i = 0; i < 8; i++)
-  {
+  for (i = 0; i < 8; i++) {
     xpdd->shared_info_area->evtchn_pending[i] = 0;
   }
 
-  for (i = 0; i < MAX_VIRT_CPUS; i++)
-  {
+  for (i = 0; i < MAX_VIRT_CPUS; i++) {
     xpdd->shared_info_area->vcpu_info[i].evtchn_upcall_pending = 0;
     xpdd->shared_info_area->vcpu_info[i].evtchn_pending_sel = 0;
     xpdd->shared_info_area->vcpu_info[i].evtchn_upcall_mask = 1; /* apparantly this doesn't do anything */
@@ -459,12 +448,13 @@ EvtChn_Init(PXENPCI_DEVICE_DATA xpdd)
   xpdd->interrupts_masked = FALSE;
   KeMemoryBarrier();
 
+#if 0
   KeInitializeEvent(&xpdd->pdo_suspend_event, SynchronizationEvent, FALSE);
   xpdd->pdo_event_channel = EvtChn_AllocIpi(xpdd, 0);
   EvtChn_BindDpc(xpdd, xpdd->pdo_event_channel, EvtChn_PdoEventChannelDpc, xpdd, EVT_ACTION_FLAGS_DEFAULT);
   xpdd->ev_actions[xpdd->pdo_event_channel].type = EVT_ACTION_TYPE_SUSPEND; /* override dpc type */
-  
   KdPrint((__DRIVER_NAME "     pdo_event_channel = %d\n", xpdd->pdo_event_channel));
+#endif  
 
   FUNCTION_EXIT();
   
@@ -475,7 +465,6 @@ NTSTATUS
 EvtChn_Suspend(PXENPCI_DEVICE_DATA xpdd)
 {
   int i;
-//  LARGE_INTEGER wait_time;
 
   xpdd->interrupts_masked = TRUE;
   for (i = 0; i < MAX_VIRT_CPUS; i++)
@@ -483,10 +472,8 @@ EvtChn_Suspend(PXENPCI_DEVICE_DATA xpdd)
   KeMemoryBarrier();
   hvm_set_parameter(xpdd, HVM_PARAM_CALLBACK_IRQ, 0);
 
-  for (i = 0; i < NR_EVENTS; i++)
-  {
-    if (xpdd->ev_actions[i].type == EVT_ACTION_TYPE_DPC)
-    {
+  for (i = 0; i < NR_EVENTS; i++) {
+    if (xpdd->ev_actions[i].type == EVT_ACTION_TYPE_DPC) {
       KeRemoveQueueDpc(&xpdd->ev_actions[i].Dpc);
     }
   }

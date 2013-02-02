@@ -95,7 +95,7 @@ static void xb_write(
   /* Remote must see entire message before updating indexes */
   KeMemoryBarrier();
   xpdd->xen_store_interface->req_prod = prod;
-  EvtChn_Notify(xpdd, xpdd->xen_store_evtchn);
+  EvtChn_Notify(xpdd, xpdd->xenbus_event);
 
   //FUNCTION_EXIT();
 }
@@ -312,7 +312,7 @@ XenBus_Dpc(PVOID ServiceContext)
     if (xpdd->xb_msg_offset < sizeof(xsd_sockmsg_t) + xpdd->xb_msg->len)
     {
       //KdPrint((__DRIVER_NAME " +++ Message incomplete (header but not full body)\n"));
-      EvtChn_Notify(xpdd, xpdd->xen_store_evtchn); /* there is room on the ring now */
+      EvtChn_Notify(xpdd, xpdd->xenbus_event); /* there is room on the ring now */
       break;
     }
 
@@ -341,7 +341,7 @@ XenBus_Dpc(PVOID ServiceContext)
       xpdd->xb_msg = NULL;
       WdfWorkItemEnqueue(workitem);
     }
-    EvtChn_Notify(xpdd, xpdd->xen_store_evtchn); /* there is room on the ring now */
+    EvtChn_Notify(xpdd, xpdd->xenbus_event); /* there is room on the ring now */
   }
   KeReleaseSpinLockFromDpcLevel(&xpdd->xb_ring_spinlock);
   
@@ -354,12 +354,12 @@ XenBus_Connect(PXENPCI_DEVICE_DATA xpdd)
   PHYSICAL_ADDRESS pa_xen_store_interface;
   xen_ulong_t xen_store_mfn;
 
-  xpdd->xen_store_evtchn = (evtchn_port_t)hvm_get_parameter(xpdd, HVM_PARAM_STORE_EVTCHN);
+  xpdd->xenbus_event = (evtchn_port_t)hvm_get_parameter(xpdd, HVM_PARAM_STORE_EVTCHN);
   xen_store_mfn = (xen_ulong_t)hvm_get_parameter(xpdd, HVM_PARAM_STORE_PFN);
   pa_xen_store_interface.QuadPart = (ULONGLONG)xen_store_mfn << PAGE_SHIFT;
   xpdd->xen_store_interface = MmMapIoSpace(pa_xen_store_interface, PAGE_SIZE, MmNonCached);
 
-  EvtChn_BindDpc(xpdd, xpdd->xen_store_evtchn, XenBus_Dpc, xpdd, EVT_ACTION_FLAGS_NO_SUSPEND);
+  EvtChn_BindDpc(xpdd, xpdd->xenbus_event, XenBus_Dpc, xpdd, EVT_ACTION_FLAGS_NO_SUSPEND);
   
   return STATUS_SUCCESS;
 }
@@ -367,7 +367,7 @@ XenBus_Connect(PXENPCI_DEVICE_DATA xpdd)
 static NTSTATUS
 XenBus_Disconnect(PXENPCI_DEVICE_DATA xpdd)
 {
-  EvtChn_Unbind(xpdd, xpdd->xen_store_evtchn);
+  EvtChn_Unbind(xpdd, xpdd->xenbus_event);
 
   MmUnmapIoSpace(xpdd->xen_store_interface, PAGE_SIZE);
   

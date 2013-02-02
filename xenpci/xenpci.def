@@ -10,10 +10,8 @@ EXPORTS
  XnCloseDevice
  XnGetValue
 
- XnAllocateEvent
- XnFreeEvent
  XnBindEvent
- XnUnBindEvent
+ XnUnbindEvent
  XnNotify
 
  XnAllocateGrant
@@ -29,3 +27,5 @@ EXPORTS
  XnWriteInt32
  XnReadInt64
  XnWriteInt64
+
+ XnDumpModeHookDebugPrint

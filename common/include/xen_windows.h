@@ -13,23 +13,12 @@
   #define __x86_64__
 #elif defined(_IA64_)
   #define __ia64__
-#elif defined(__MINGW32__)
-  /* __i386__ already defined */
 #elif defined(_X86_)
   #define __i386__
 #else
   #error Unknown architecture
 #endif
 
-#ifdef __MINGW32__
-typedef signed char int8_t;
-typedef unsigned char uint8_t;
-typedef signed short int16_t;
-typedef unsigned short uint16_t;
-typedef signed int int32_t;
-typedef unsigned int uint32_t;
-typedef unsigned long long uint64_t;
-#else
 typedef INT8 int8_t;
 typedef UINT8 uint8_t;
 typedef INT16 int16_t;
@@ -37,7 +26,6 @@ typedef UINT16 uint16_t;
 typedef INT32 int32_t;
 typedef UINT32 uint32_t;
 typedef UINT64 uint64_t;
-#endif
 
 #include <xen.h>
 #include <grant_table.h>
@@ -68,7 +56,9 @@ typedef unsigned long xenbus_transaction_t;
 #define wmb() KeMemoryBarrier()
 #define mb() KeMemoryBarrier()
 
-#define IOCTL_XEN_RECONFIGURE CTL_CODE(0x8000, 0x800, METHOD_NEITHER, 0)
+//#define IOCTL_XEN_RECONFIGURE CTL_CODE(0x8000, 0x800, METHOD_NEITHER, 0)
+//#define IOCTL_XEN_SUSPEND CTL_CODE(0x8000, 0x801, METHOD_NEITHER, 0)
+//#define IOCTL_XEN_RESUME  CTL_CODE(0x8000, 0x802, METHOD_NEITHER, 0)
 
 static __inline char **
 SplitString(char *String, char Split, int MaxParts, int *Count)
@@ -217,12 +207,12 @@ the wrong width is used with the wrong defined port
 #define XN_BASE_BACKEND  2 /* path is relative to backend device */
 #define XN_BASE_GLOBAL   3 /* path is relative to root of xenstore */
 
+#define XN_DEVICE_CALLBACK_BACKEND_STATE 1 /* backend state change callback */
+#define XN_DEVICE_CALLBACK_SUSPEND       2
+#define XN_DEVICE_CALLBACK_RESUME        3
+
 
 typedef PVOID XN_HANDLE;
-
-/* get a handle given a PDO */
-typedef XN_HANDLE
-(*PXN_GET_HANDLE)(PDEVICE_OBJECT pdo);
 
 typedef VOID
 (*PXN_WATCH_CALLBACK)(PVOID context, char *path);
@@ -231,13 +221,13 @@ typedef VOID
 (*PXN_EVENT_CALLBACK)(PVOID context);
 
 typedef VOID
-(*PXN_BACKEND_STATE_CALLBACK)(PVOID context, ULONG state);
+(*PXN_DEVICE_CALLBACK)(PVOID context, ULONG callback_type, PVOID value);
 
 ULONG
 XnGetVersion();
 
 XN_HANDLE
-XnOpenDevice(PDEVICE_OBJECT pdo, PXN_BACKEND_STATE_CALLBACK callback, PVOID context);
+XnOpenDevice(PDEVICE_OBJECT pdo, PXN_DEVICE_CALLBACK callback, PVOID context);
 
 VOID
 XnCloseDevice(XN_HANDLE handle);
@@ -296,14 +286,11 @@ XnAllocateGrant(XN_HANDLE handle, ULONG tag);
 VOID
 XnFreeGrant(XN_HANDLE handle, grant_ref_t ref, ULONG tag);
 
-evtchn_port_t
-XnAllocateEvent(XN_HANDLE handle);
+NTSTATUS
+XnBindEvent(XN_HANDLE handle, evtchn_port_t *port, PXN_EVENT_CALLBACK callback, PVOID context);
 
 NTSTATUS
-XnBindEvent(XN_HANDLE handle, evtchn_port_t port, PXN_EVENT_CALLBACK callback, PVOID context);
-
-NTSTATUS
-XnUnBindEvent(XN_HANDLE handle, evtchn_port_t port);
+XnUnbindEvent(XN_HANDLE handle, evtchn_port_t port);
 
 #ifndef XENPCI_POOL_TAG
 #define XENPCI_POOL_TAG (ULONG) 'XenP'
@@ -316,7 +303,8 @@ XnFreeMem(XN_HANDLE handle, PVOID Ptr) {
 }
 
 
-
+VOID
+XnDumpModeHookDebugPrint();
 
 
 

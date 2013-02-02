@@ -470,26 +470,23 @@ XenPci_Suspend0(PVOID context)
   
   cancelled = hvm_shutdown(xpdd, SHUTDOWN_suspend);
 
-  if (__readmsr(0x174) != sysenter_cs)
-  {
+  /* this code was to fix a bug that existed in Xen for a short time... it is harmless but can probably be removed */
+  if (__readmsr(0x174) != sysenter_cs) {
     KdPrint((__DRIVER_NAME "     sysenter_cs not restored. Fixing.\n"));
     __writemsr(0x174, sysenter_cs);
   }
-  if (__readmsr(0x175) != sysenter_esp)
-  {
+  if (__readmsr(0x175) != sysenter_esp) {
     KdPrint((__DRIVER_NAME "     sysenter_esp not restored. Fixing.\n"));
     __writemsr(0x175, sysenter_esp);
   }
-  if (__readmsr(0x176) != sysenter_eip)
-  {
+  if (__readmsr(0x176) != sysenter_eip) {
       KdPrint((__DRIVER_NAME "     sysenter_eip not restored. Fixing.\n"));
     __writemsr(0x176, sysenter_eip);
   }
 
   KdPrint((__DRIVER_NAME "     back from suspend, cancelled = %d\n", cancelled));
 
-  if (qemu_hide_flags_value)
-  {
+  if (qemu_hide_flags_value) {
     XenPci_HideQemuDevices();
   }
 
@@ -517,8 +514,7 @@ XenPci_ConnectSuspendEvt(PXENPCI_DEVICE_DATA xpdd);
 
 /* called at PASSIVE_LEVEL */
 static NTSTATUS
-XenPci_ConnectSuspendEvt(PXENPCI_DEVICE_DATA xpdd)
-{
+XenPci_ConnectSuspendEvt(PXENPCI_DEVICE_DATA xpdd) {
   CHAR path[128];
 
   xpdd->suspend_evtchn = EvtChn_AllocUnbound(xpdd, 0);
@@ -532,8 +528,7 @@ XenPci_ConnectSuspendEvt(PXENPCI_DEVICE_DATA xpdd)
 
 /* Called at PASSIVE_LEVEL */
 static VOID
-XenPci_SuspendResume(WDFWORKITEM workitem)
-{
+XenPci_SuspendResume(WDFWORKITEM workitem) {
   NTSTATUS status;
   //KAFFINITY ActiveProcessorMask = 0; // this is for Vista+
   WDFDEVICE device = WdfWorkItemGetParentObject(workitem);
@@ -544,19 +539,17 @@ XenPci_SuspendResume(WDFWORKITEM workitem)
 
   FUNCTION_ENTER();
 
-  if (xpdd->suspend_state == SUSPEND_STATE_NONE)
-  {
+  if (xpdd->suspend_state == SUSPEND_STATE_NONE) {
+    KeAcquireGuardedMutex(&xpdd->suspend_mutex);
     xpdd->suspend_state = SUSPEND_STATE_SCHEDULED;
     KeMemoryBarrier();
-
+    
+    // how to prevent device addition etc here? is it implied because dom0 initiated the suspend?
     WDF_CHILD_LIST_ITERATOR_INIT(&child_iterator, WdfRetrievePresentChildren);
+      
     WdfChildListBeginIteration(child_list, &child_iterator);
-    while ((status = WdfChildListRetrieveNextDevice(child_list, &child_iterator, &child_device, NULL)) == STATUS_SUCCESS)
-    {
-      KdPrint((__DRIVER_NAME "     Suspending child\n"));
-#if 0
-      XenPci_Pdo_Suspend(child_device);
-#endif
+    while ((status = WdfChildListRetrieveNextDevice(child_list, &child_iterator, &child_device, NULL)) == STATUS_SUCCESS) {
+      XenPci_SuspendPdo(child_device);
     }
     WdfChildListEndIteration(child_list, &child_iterator);
 
@@ -570,16 +563,13 @@ XenPci_SuspendResume(WDFWORKITEM workitem)
     XenPci_ConnectSuspendEvt(xpdd);
 
     WdfChildListBeginIteration(child_list, &child_iterator);
-    while ((status = WdfChildListRetrieveNextDevice(child_list, &child_iterator, &child_device, NULL)) == STATUS_SUCCESS)
-    {
-      KdPrint((__DRIVER_NAME "     Resuming child\n"));
-#if 0
-      XenPci_Pdo_Resume(child_device);
-#endif
+    while ((status = WdfChildListRetrieveNextDevice(child_list, &child_iterator, &child_device, NULL)) == STATUS_SUCCESS) {
+      XenPci_ResumePdo(child_device);
     }
     WdfChildListEndIteration(child_list, &child_iterator);
 
     xpdd->suspend_state = SUSPEND_STATE_NONE;
+    KeReleaseGuardedMutex(&xpdd->suspend_mutex);
   }
   FUNCTION_EXIT();
 }
@@ -948,15 +938,13 @@ XenPci_EvtDeviceD0ExitPreInterruptsDisabled(WDFDEVICE device, WDF_POWER_DEVICE_S
 }
 
 NTSTATUS
-XenPci_EvtDeviceD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE target_state)
-{
+XenPci_EvtDeviceD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE target_state) {
   NTSTATUS status = STATUS_SUCCESS;
   PXENPCI_DEVICE_DATA xpdd = GetXpdd(device);
   
   FUNCTION_ENTER();
 
-  switch (target_state)
-  {
+  switch (target_state) {
   case WdfPowerDeviceD0:
     KdPrint((__DRIVER_NAME "     WdfPowerDeviceD1\n"));
     break;
@@ -981,15 +969,11 @@ XenPci_EvtDeviceD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE target_state)
     break;  
   }
   
-  if (target_state == WdfPowerDeviceD3Final)
-  {
+  if (target_state == WdfPowerDeviceD3Final) {
     /* we don't really support exit here */
-  }
-  else
-  {
+  } else {
     EvtChn_Suspend(xpdd);
     GntTbl_Suspend(xpdd);
-    
   }
 
   FUNCTION_EXIT();

@@ -260,9 +260,15 @@ typedef struct {
 /* don't split incoming large packets. not really useful */
 #define RX_LSO_SPLIT_NONE 2
 
+#define DEVICE_STATE_DISCONNECTED  0 /* -> INITIALISING */
+#define DEVICE_STATE_INITIALISING  1 /* -> ACTIVE or INACTIVE */
+#define DEVICE_STATE_INACTIVE      2
+#define DEVICE_STATE_ACTIVE        3 /* -> DISCONNECTING */
+#define DEVICE_STATE_DISCONNECTING 4 /* -> DISCONNECTED */
+
 struct xennet_info
 {
-  BOOLEAN inactive;
+  ULONG device_state;
   
   /* Base device vars */
   PDEVICE_OBJECT pdo;
@@ -274,16 +280,13 @@ struct xennet_info
   /* NDIS-related vars */
   NDIS_HANDLE adapter_handle;
   ULONG packet_filter;
-  BOOLEAN connected;
-  BOOLEAN shutting_down;
-  BOOLEAN tx_shutting_down;
-  BOOLEAN rx_shutting_down;
+  //BOOLEAN connected;
   uint8_t perm_mac_addr[ETH_ALEN];
   uint8_t curr_mac_addr[ETH_ALEN];
   ULONG current_lookahead;
-  NDIS_DEVICE_POWER_STATE new_power_state;
-  NDIS_DEVICE_POWER_STATE power_state;
-  PIO_WORKITEM power_workitem;
+  //NDIS_DEVICE_POWER_STATE new_power_state;
+  //NDIS_DEVICE_POWER_STATE power_state;
+  //PIO_WORKITEM power_workitem;
 
   /* Misc. Xen vars */
   XN_HANDLE handle;
@@ -294,35 +297,33 @@ struct xennet_info
   //ULONG state;
   //char backend_path[MAX_XENBUS_STR_LEN];
   ULONG backend_state;
-  NDIS_EVENT backend_event;
+  KEVENT backend_event;
   //PVOID config_page;
   UCHAR multicast_list[MULTICAST_LIST_MAX_SIZE][6];
   ULONG multicast_list_size;
-  KDPC suspend_dpc;
-  PIO_WORKITEM resume_work_item;
-  KSPIN_LOCK resume_lock;
+  //KDPC suspend_dpc;
+  //PIO_WORKITEM resume_work_item;
+  //KSPIN_LOCK resume_lock;
   KDPC rxtx_dpc;
 
   /* tx related - protected by tx_lock */
-  KSPIN_LOCK tx_lock;
+  KSPIN_LOCK tx_lock; /* always acquire rx_lock before tx_lock */
   LIST_ENTRY tx_waiting_pkt_list;
   netif_tx_sring_t *tx_sring;
   grant_ref_t tx_sring_gref;
   struct netif_tx_front_ring tx_ring;
   ULONG tx_ring_free;
   tx_shadow_t tx_shadows[NET_TX_RING_SIZE];
-  //NDIS_HANDLE tx_buffer_pool;
 #define TX_HEADER_BUFFER_SIZE 512
-//#define TX_COALESCE_BUFFERS (NET_TX_RING_SIZE >> 2)
 #define TX_COALESCE_BUFFERS (NET_TX_RING_SIZE)
-  KEVENT tx_idle_event;
   ULONG tx_outstanding;
   ULONG tx_id_free;
   USHORT tx_id_list[NET_TX_RING_SIZE];
   NPAGED_LOOKASIDE_LIST tx_lookaside_list;
+  KEVENT tx_idle_event;
 
   /* rx_related - protected by rx_lock */
-  KSPIN_LOCK rx_lock;
+  KSPIN_LOCK rx_lock; /* always acquire rx_lock before tx_lock */
   netif_rx_sring_t *rx_sring;
   grant_ref_t rx_sring_gref;
   struct netif_rx_front_ring rx_ring;
@@ -343,9 +344,10 @@ struct xennet_info
   shared_buffer_t *rx_partial_buf;
   BOOLEAN rx_partial_extra_info_flag ;
   BOOLEAN rx_partial_more_data_flag;
-
+  KEVENT rx_idle_event;
   /* how many packets are in the net stack atm */
   LONG rx_outstanding;
+
 
   /* config vars from registry */
   /* the frontend_* indicate our willingness to support */
@@ -400,35 +402,13 @@ MINIPORT_CANCEL_SEND XenNet_CancelSend;
 
 MINIPORT_RETURN_NET_BUFFER_LISTS XenNet_ReturnNetBufferLists;
 
-BOOLEAN
-XenNet_RxInit(xennet_info_t *xi);
+BOOLEAN XenNet_RxInit(xennet_info_t *xi);
+VOID XenNet_RxShutdown(xennet_info_t *xi);
+BOOLEAN XenNet_RxBufferCheck(struct xennet_info *xi);
 
-BOOLEAN
-XenNet_RxShutdown(xennet_info_t *xi);
-
-VOID
-XenNet_RxResumeStart(xennet_info_t *xi);
-
-VOID
-XenNet_RxResumeEnd(xennet_info_t *xi);
-
-BOOLEAN
-XenNet_RxBufferCheck(struct xennet_info *xi);
-
-VOID
-XenNet_TxResumeStart(xennet_info_t *xi);
-
-VOID
-XenNet_TxResumeEnd(xennet_info_t *xi);
-
-BOOLEAN
-XenNet_TxInit(xennet_info_t *xi);
-
-BOOLEAN
-XenNet_TxShutdown(xennet_info_t *xi);
-
-VOID
-XenNet_TxBufferGC(struct xennet_info *xi, BOOLEAN dont_set_event);
+BOOLEAN XenNet_TxInit(xennet_info_t *xi);
+BOOLEAN XenNet_TxShutdown(xennet_info_t *xi);
+VOID XenNet_TxBufferGC(struct xennet_info *xi, BOOLEAN dont_set_event);
 
 #if 0
 NDIS_STATUS

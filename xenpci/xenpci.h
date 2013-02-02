@@ -67,9 +67,9 @@ DEFINE_GUID( GUID_XENPCI_DEVCLASS, 0xC828ABE9, 0x14CA, 0x4445, 0xBA, 0xA6, 0x82,
 #define EVT_ACTION_TYPE_EMPTY   0
 #define EVT_ACTION_TYPE_NORMAL  1
 #define EVT_ACTION_TYPE_DPC     2
-#define EVT_ACTION_TYPE_IRQ     3
-#define EVT_ACTION_TYPE_SUSPEND 4
-#define EVT_ACTION_TYPE_NEW     5 /* setup of event is in progress */
+//#define EVT_ACTION_TYPE_IRQ     3
+//#define EVT_ACTION_TYPE_SUSPEND 4
+#define EVT_ACTION_TYPE_NEW     9 /* setup of event is in progress */
 
 #define EVT_ACTION_FLAGS_DEFAULT    0 /* no special flags */
 #define EVT_ACTION_FLAGS_NO_SUSPEND 1 /* should not be fired on EVT_ACTION_TYPE_SUSPEND event */
@@ -85,17 +85,16 @@ extern USHORT xen_version_major;
 extern USHORT xen_version_minor;
 
 typedef struct _ev_action_t {
+  PVOID xpdd;
+  //evtchn_port_t port;
   PXN_EVENT_CALLBACK ServiceRoutine;
   PVOID ServiceContext;
   CHAR description[128];
   ULONG type; /* EVT_ACTION_TYPE_* */
   ULONG flags; /* EVT_ACTION_FLAGS_* */
   KDPC Dpc;
-  ULONG port;
   ULONG vector;
   ULONG count;
-  PVOID xpdd;
-  ULONG generation; /* increases each time the event is renewed */
 } ev_action_t;
 
 typedef struct _XENBUS_WATCH_RING
@@ -153,8 +152,8 @@ typedef struct {
   shared_info_t *shared_info_area;
   xen_ulong_t evtchn_pending_pvt[MAX_VIRT_CPUS][sizeof(xen_ulong_t) * 8];
   xen_ulong_t evtchn_pending_suspend[sizeof(xen_ulong_t) * 8];
-  evtchn_port_t pdo_event_channel;
-  KEVENT pdo_suspend_event;
+  //evtchn_port_t pdo_event_channel;
+  //KEVENT pdo_suspend_event;
   BOOLEAN interrupts_masked;
   
   PHYSICAL_ADDRESS platform_mmio_addr;
@@ -168,7 +167,7 @@ typedef struct {
 
   char *hypercall_stubs;
 
-  evtchn_port_t xen_store_evtchn;
+  evtchn_port_t xenbus_event;
 
   /* grant related */
   struct stack_state *gnttbl_ss;
@@ -210,8 +209,9 @@ typedef struct {
   
   WDFCHILDLIST child_list;
   
-  KSPIN_LOCK suspend_lock;  
-  evtchn_port_t suspend_evtchn;
+  KGUARDED_MUTEX suspend_mutex;
+  
+  ULONG suspend_evtchn;
   int suspend_state;
   
   UNICODE_STRING legacy_interface_name;
@@ -246,6 +246,7 @@ typedef struct {
 typedef struct {  
   WDFDEVICE wdf_device;
   WDFDEVICE wdf_device_bus_fdo;
+  PXENPCI_DEVICE_DATA xpdd;
   BOOLEAN reported_missing;
   char path[128];
   char device[128];
@@ -257,8 +258,8 @@ typedef struct {
   domid_t backend_id;
   KEVENT backend_state_event;
   ULONG backend_state;
-  PXN_BACKEND_STATE_CALLBACK backend_state_callback;
-  PVOID backend_state_callback_context;
+  PXN_DEVICE_CALLBACK device_callback;
+  PVOID device_callback_context;
   FAST_MUTEX backend_state_mutex;
   ULONG frontend_state;
   PMDL config_page_mdl;
@@ -335,8 +336,7 @@ XenPci_FreeMem(PVOID Ptr) {
   ExFreePoolWithTag(Ptr, XENPCI_POOL_TAG);
 }
 
-NTSTATUS
-XenBus_DeviceFileInit(WDFDEVICE device, PWDF_IO_QUEUE_CONFIG queue_config, WDFFILEOBJECT file_object);
+NTSTATUS XenBus_DeviceFileInit(WDFDEVICE device, PWDF_IO_QUEUE_CONFIG queue_config, WDFFILEOBJECT file_object);
 
 EVT_WDF_DEVICE_FILE_CREATE XenPci_EvtDeviceFileCreate;
 EVT_WDF_FILE_CLOSE XenPci_EvtFileClose;
@@ -360,10 +360,8 @@ EVT_WDF_IO_QUEUE_IO_DEFAULT XenPci_EvtIoDefault;
 
 #define XBT_NIL ((xenbus_transaction_t)0)
 
-PVOID
-hvm_get_hypercall_stubs();
-VOID
-hvm_free_hypercall_stubs(PVOID hypercall_stubs);
+PVOID hvm_get_hypercall_stubs();
+VOID hvm_free_hypercall_stubs(PVOID hypercall_stubs);
 
 EVT_WDF_DEVICE_PREPARE_HARDWARE XenPci_EvtDevicePrepareHardware;
 EVT_WDF_DEVICE_RELEASE_HARDWARE XenPci_EvtDeviceReleaseHardware;
@@ -375,61 +373,43 @@ EVT_WDF_DEVICE_QUERY_REMOVE XenPci_EvtDeviceQueryRemove;
 EVT_WDF_CHILD_LIST_CREATE_DEVICE XenPci_EvtChildListCreateDevice;
 EVT_WDF_CHILD_LIST_SCAN_FOR_CHILDREN XenPci_EvtChildListScanForChildren;
 
-VOID
-XenPci_HideQemuDevices();
+VOID XenPci_HideQemuDevices();
 extern WDFCOLLECTION qemu_hide_devices;
 extern USHORT qemu_hide_flags_value;
 
-NTSTATUS
-XenPci_Pdo_Suspend(WDFDEVICE device);
-NTSTATUS
-XenPci_Pdo_Resume(WDFDEVICE device);
+//NTSTATUS XenPci_Pdo_Suspend(WDFDEVICE device);
+//NTSTATUS XenPci_Pdo_Resume(WDFDEVICE device);
 
-VOID
-XenPci_DumpPdoConfig(PDEVICE_OBJECT device_object);
+VOID XenPci_BackendStateCallback(char *path, PVOID context);
+NTSTATUS XenPci_SuspendPdo(WDFDEVICE device);
+NTSTATUS XenPci_ResumePdo(WDFDEVICE device);
 
-typedef VOID
-(*PXENPCI_HIGHSYNC_FUNCTION)(PVOID context);
 
-VOID
-XenPci_HighSync(PXENPCI_HIGHSYNC_FUNCTION function0, PXENPCI_HIGHSYNC_FUNCTION functionN, PVOID context);
+VOID XenPci_DumpPdoConfig(PDEVICE_OBJECT device_object);
 
-VOID
-XenPci_PatchKernel(PXENPCI_DEVICE_DATA xpdd, PVOID base, ULONG length);
+typedef VOID (*PXENPCI_HIGHSYNC_FUNCTION)(PVOID context);
 
-NTSTATUS
-XenPci_HookDbgPrint();
-NTSTATUS
-XenPci_UnHookDbgPrint();
+VOID XenPci_HighSync(PXENPCI_HIGHSYNC_FUNCTION function0, PXENPCI_HIGHSYNC_FUNCTION functionN, PVOID context);
 
-struct xsd_sockmsg *
-XenBus_Raw(PXENPCI_DEVICE_DATA xpdd, struct xsd_sockmsg *msg);
-char *
-XenBus_Read(PVOID Context, xenbus_transaction_t xbt, char *path, char **value);
-char *
-XenBus_Write(PVOID Context, xenbus_transaction_t xbt, char *path, char *value);
-char *
-XenBus_Printf(PVOID Context, xenbus_transaction_t xbt, char *path, char *fmt, ...);
-char *
-XenBus_StartTransaction(PVOID Context, xenbus_transaction_t *xbt);
-char *
-XenBus_EndTransaction(PVOID Context, xenbus_transaction_t t, int abort, int *retry);
-char *
-XenBus_List(PVOID Context, xenbus_transaction_t xbt, char *prefix, char ***contents);
-char *
-XenBus_AddWatch(PVOID Context, xenbus_transaction_t xbt, char *Path, PXN_WATCH_CALLBACK ServiceRoutine, PVOID ServiceContext);
-char *
-XenBus_RemWatch(PVOID Context, xenbus_transaction_t xbt, char *Path, PXN_WATCH_CALLBACK ServiceRoutine, PVOID ServiceContext);
-//VOID
-//XenBus_ThreadProc(PVOID StartContext);
-NTSTATUS
-XenBus_Init(PXENPCI_DEVICE_DATA xpdd);
-NTSTATUS
-XenBus_Halt(PXENPCI_DEVICE_DATA xpdd);
-NTSTATUS
-XenBus_Suspend(PXENPCI_DEVICE_DATA xpdd);
-NTSTATUS
-XenBus_Resume(PXENPCI_DEVICE_DATA xpdd);
+VOID XenPci_PatchKernel(PXENPCI_DEVICE_DATA xpdd, PVOID base, ULONG length);
+
+NTSTATUS XenPci_HookDbgPrint();
+NTSTATUS XenPci_UnHookDbgPrint();
+VOID XenPci_DumpModeHookDebugPrint();
+
+struct xsd_sockmsg *XenBus_Raw(PXENPCI_DEVICE_DATA xpdd, struct xsd_sockmsg *msg);
+char *XenBus_Read(PVOID Context, xenbus_transaction_t xbt, char *path, char **value);
+char *XenBus_Write(PVOID Context, xenbus_transaction_t xbt, char *path, char *value);
+char *XenBus_Printf(PVOID Context, xenbus_transaction_t xbt, char *path, char *fmt, ...);
+char *XenBus_StartTransaction(PVOID Context, xenbus_transaction_t *xbt);
+char *XenBus_EndTransaction(PVOID Context, xenbus_transaction_t t, int abort, int *retry);
+char *XenBus_List(PVOID Context, xenbus_transaction_t xbt, char *prefix, char ***contents);
+char *XenBus_AddWatch(PVOID Context, xenbus_transaction_t xbt, char *Path, PXN_WATCH_CALLBACK ServiceRoutine, PVOID ServiceContext);
+char *XenBus_RemWatch(PVOID Context, xenbus_transaction_t xbt, char *Path, PXN_WATCH_CALLBACK ServiceRoutine, PVOID ServiceContext);
+NTSTATUS XenBus_Init(PXENPCI_DEVICE_DATA xpdd);
+NTSTATUS XenBus_Halt(PXENPCI_DEVICE_DATA xpdd);
+NTSTATUS XenBus_Suspend(PXENPCI_DEVICE_DATA xpdd);
+NTSTATUS XenBus_Resume(PXENPCI_DEVICE_DATA xpdd);
 
 PHYSICAL_ADDRESS
 XenPci_AllocMMIO(PXENPCI_DEVICE_DATA xpdd, ULONG len);
@@ -438,49 +418,28 @@ EVT_WDF_INTERRUPT_ISR EvtChn_EvtInterruptIsr;
 EVT_WDF_INTERRUPT_ENABLE EvtChn_EvtInterruptEnable;
 EVT_WDF_INTERRUPT_DISABLE EvtChn_EvtInterruptDisable;
 
-NTSTATUS
-EvtChn_Init(PXENPCI_DEVICE_DATA xpdd);
-NTSTATUS
-EvtChn_Suspend(PXENPCI_DEVICE_DATA xpdd);
-NTSTATUS
-EvtChn_Resume(PXENPCI_DEVICE_DATA xpdd);
+NTSTATUS EvtChn_Init(PXENPCI_DEVICE_DATA xpdd);
+NTSTATUS EvtChn_Suspend(PXENPCI_DEVICE_DATA xpdd);
+NTSTATUS EvtChn_Resume(PXENPCI_DEVICE_DATA xpdd);
 
-NTSTATUS
-EvtChn_Mask(PVOID Context, evtchn_port_t Port);
-NTSTATUS
-EvtChn_Unmask(PVOID Context, evtchn_port_t Port);
-NTSTATUS
-EvtChn_Bind(PVOID Context, evtchn_port_t Port, PXN_EVENT_CALLBACK ServiceRoutine, PVOID ServiceContext, ULONG flags);
-NTSTATUS
-EvtChn_BindDpc(PVOID Context, evtchn_port_t Port, PXN_EVENT_CALLBACK ServiceRoutine, PVOID ServiceContext, ULONG flags);
-NTSTATUS
-EvtChn_BindIrq(PVOID Context, evtchn_port_t Port, ULONG vector, PCHAR description, ULONG flags);
-evtchn_port_t
-EvtChn_AllocIpi(PVOID context, ULONG vcpu);
-NTSTATUS
-EvtChn_Unbind(PVOID Context, evtchn_port_t Port);
-NTSTATUS
-EvtChn_Notify(PVOID Context, evtchn_port_t Port);
-VOID
-EvtChn_Close(PVOID Context, evtchn_port_t Port);
-evtchn_port_t
-EvtChn_AllocUnbound(PVOID Context, domid_t Domain);
-BOOLEAN
-EvtChn_AckEvent(PVOID context, evtchn_port_t port, BOOLEAN *last_interrupt);
+NTSTATUS EvtChn_Mask(PVOID context, evtchn_port_t port);
+NTSTATUS EvtChn_Unmask(PVOID context, evtchn_port_t port);
+NTSTATUS EvtChn_Bind(PVOID context, evtchn_port_t port, PXN_EVENT_CALLBACK ServiceRoutine, PVOID ServiceContext, ULONG flags);
+NTSTATUS EvtChn_BindDpc(PVOID context, evtchn_port_t port, PXN_EVENT_CALLBACK ServiceRoutine, PVOID ServiceContext, ULONG flags);
+//ULONG EvtChn_AllocIpi(PVOID context, ULONG vcpu);
+NTSTATUS EvtChn_Unbind(PVOID context, evtchn_port_t port);
+NTSTATUS EvtChn_Notify(PVOID context, evtchn_port_t port);
+VOID EvtChn_Close(PVOID context, evtchn_port_t port);
+evtchn_port_t EvtChn_AllocUnbound(PVOID context, domid_t domain);
+//BOOLEAN EvtChn_AckEvent(PVOID context, evtchn_port_t port, BOOLEAN *last_interrupt);
+evtchn_port_t EvtChn_GetEventPort(PVOID context, evtchn_port_t port);
 
-VOID
-GntTbl_Init(PXENPCI_DEVICE_DATA xpdd);
-VOID
-GntTbl_Suspend(PXENPCI_DEVICE_DATA xpdd);
-VOID
-GntTbl_Resume(PXENPCI_DEVICE_DATA xpdd);
-grant_ref_t
-GntTbl_GrantAccess(PVOID Context, domid_t domid, uint32_t, int readonly, grant_ref_t ref, ULONG tag);
-BOOLEAN
-GntTbl_EndAccess(PVOID Context, grant_ref_t ref, BOOLEAN keepref, ULONG tag);
-VOID
-GntTbl_PutRef(PVOID Context, grant_ref_t ref, ULONG tag);
-grant_ref_t
-GntTbl_GetRef(PVOID Context, ULONG tag);
+VOID GntTbl_Init(PXENPCI_DEVICE_DATA xpdd);
+VOID GntTbl_Suspend(PXENPCI_DEVICE_DATA xpdd);
+VOID GntTbl_Resume(PXENPCI_DEVICE_DATA xpdd);
+grant_ref_t GntTbl_GrantAccess(PVOID Context, domid_t domid, uint32_t, int readonly, grant_ref_t ref, ULONG tag);
+BOOLEAN GntTbl_EndAccess(PVOID Context, grant_ref_t ref, BOOLEAN keepref, ULONG tag);
+VOID GntTbl_PutRef(PVOID Context, grant_ref_t ref, ULONG tag);
+grant_ref_t GntTbl_GetRef(PVOID Context, ULONG tag);
 
 #endif

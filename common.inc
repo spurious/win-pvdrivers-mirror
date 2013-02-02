@@ -6,4 +6,4 @@ C_DEFINES=$(C_DEFINES) -DWIN_KERNEL_BUILD
 LIBLFDS_DIR = ..\liblfds.6
 INCLUDES = ..\common\include;..\common\include\public;$(LIBLFDS_DIR)\inc
 TARGETLIBS=$(TARGETLIBS) $(DDK_LIB_PATH)\ntstrsafe.lib
-NTTARGETFILES=
+#NTTARGETFILES=

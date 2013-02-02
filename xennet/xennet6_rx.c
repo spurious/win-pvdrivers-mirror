@@ -35,7 +35,7 @@ get_pb_from_freelist(struct xennet_info *xi)
   }
 
   /* don't allocate a new one if we are shutting down */
-  if (xi->shutting_down)
+  if (xi->device_state != DEVICE_STATE_INITIALISING && xi->device_state != DEVICE_STATE_ACTIVE)
     return NULL;
     
   pb = NdisAllocateMemoryWithTagPriority(xi->adapter_handle, sizeof(shared_buffer_t), XENNET_POOL_TAG, LowPoolPriority);
@@ -112,7 +112,7 @@ get_hb_from_freelist(struct xennet_info *xi)
   }
 
   /* don't allocate a new one if we are shutting down */
-  if (xi->shutting_down)
+  if (xi->device_state != DEVICE_STATE_INITIALISING && xi->device_state != DEVICE_STATE_ACTIVE)
     return NULL;
     
   hb = NdisAllocateMemoryWithTagPriority(xi->adapter_handle, sizeof(shared_buffer_t) + MAX_ETH_HEADER_LENGTH + MAX_LOOKAHEAD_LENGTH, XENNET_POOL_TAG, LowPoolPriority);
@@ -120,8 +120,7 @@ get_hb_from_freelist(struct xennet_info *xi)
     return NULL;
   NdisZeroMemory(hb, sizeof(shared_buffer_t));
   hb->mdl = IoAllocateMdl(hb + 1, MAX_ETH_HEADER_LENGTH + MAX_LOOKAHEAD_LENGTH, FALSE, FALSE, NULL);
-  if (!hb->mdl)
-  {
+  if (!hb->mdl) {
     NdisFreeMemory(hb, sizeof(shared_buffer_t) + MAX_ETH_HEADER_LENGTH + MAX_LOOKAHEAD_LENGTH, 0);
     return NULL;
   }
@@ -155,17 +154,14 @@ XenNet_FillRing(struct xennet_info *xi)
 
   batch_target = xi->rx_target - (req_prod - xi->rx_ring.rsp_cons);
 
-  if (batch_target < (xi->rx_target >> 2))
-  {
+  if (batch_target < (xi->rx_target >> 2)) {
     //FUNCTION_EXIT();
     return NDIS_STATUS_SUCCESS; /* only refill if we are less than 3/4 full already */
   }
 
-  for (i = 0; i < batch_target; i++)
-  {
+  for (i = 0; i < batch_target; i++) {
     page_buf = get_pb_from_freelist(xi);
-    if (!page_buf)
-    {
+    if (!page_buf) {
       KdPrint((__DRIVER_NAME "     Added %d out of %d buffers to rx ring (no free pages)\n", i, batch_target));
       break;
     }
@@ -183,8 +179,7 @@ XenNet_FillRing(struct xennet_info *xi)
   KeMemoryBarrier();
   xi->rx_ring.req_prod_pvt = req_prod + i;
   RING_PUSH_REQUESTS_AND_CHECK_NOTIFY(&xi->rx_ring, notify);
-  if (notify)
-  {
+  if (notify) {
     XnNotify(xi->handle, xi->event_channel);
   }
 
@@ -562,8 +557,8 @@ XenNet_ReturnNetBufferLists(NDIS_HANDLE adapter_context, PNET_BUFFER_LIST curr_n
     curr_nbl = next_nbl;
   }
   
-  if (!xi->rx_outstanding && xi->rx_shutting_down)
-    KeSetEvent(&xi->packet_returned_event, IO_NO_INCREMENT, FALSE);
+  if (!xi->rx_outstanding && xi->device_state != DEVICE_STATE_ACTIVE)
+    KeSetEvent(&xi->rx_idle_event, IO_NO_INCREMENT, FALSE);
 
   //FUNCTION_EXIT();
 }
@@ -602,9 +597,6 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
   BOOLEAN dont_set_event;
   //FUNCTION_ENTER();
 
-  if (!xi->connected)
-    return FALSE; /* a delayed DPC could let this come through... just do nothing */
-
   rc.first_nbl = NULL;
   rc.last_nbl = NULL;
   rc.packet_count = 0;
@@ -613,15 +605,13 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
   /* get all the buffers off the ring as quickly as possible so the lock is held for a minimum amount of time */
   KeAcquireSpinLockAtDpcLevel(&xi->rx_lock);
   
-  if (xi->rx_shutting_down)
-  {
+  if (xi->device_state != DEVICE_STATE_ACTIVE) {
     /* there is a chance that our Dpc had been queued just before the shutdown... */
     KeReleaseSpinLockFromDpcLevel(&xi->rx_lock);
     return FALSE;
   }
 
-  if (xi->rx_partial_buf)
-  {
+  if (xi->rx_partial_buf) {
     head_buf = xi->rx_partial_buf;
     tail_buf = xi->rx_partial_buf;
     while (tail_buf->next)
@@ -635,19 +625,15 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
     prod = xi->rx_ring.sring->rsp_prod;
     KeMemoryBarrier(); /* Ensure we see responses up to 'prod'. */
 
-    for (cons = xi->rx_ring.rsp_cons; cons != prod && packet_count < MAXIMUM_PACKETS_PER_INTERRUPT && packet_data < MAXIMUM_DATA_PER_INTERRUPT; cons++)
-    {
+    for (cons = xi->rx_ring.rsp_cons; cons != prod && packet_count < MAXIMUM_PACKETS_PER_INTERRUPT && packet_data < MAXIMUM_DATA_PER_INTERRUPT; cons++) {
       id = (USHORT)(cons & (NET_RX_RING_SIZE - 1));
       page_buf = xi->rx_ring_pbs[id];
       NT_ASSERT(page_buf);
       xi->rx_ring_pbs[id] = NULL;
       xi->rx_id_free++;
       memcpy(&page_buf->rsp, RING_GET_RESPONSE(&xi->rx_ring, cons), max(sizeof(struct netif_rx_response), sizeof(struct netif_extra_info)));
-      if (!extra_info_flag)
-      {
-        if (page_buf->rsp.status <= 0
-          || page_buf->rsp.offset + page_buf->rsp.status > PAGE_SIZE)
-        {
+      if (!extra_info_flag) {
+        if (page_buf->rsp.status <= 0 || page_buf->rsp.offset + page_buf->rsp.status > PAGE_SIZE) {
           KdPrint((__DRIVER_NAME "     Error: rsp offset %d, size %d\n",
             page_buf->rsp.offset, page_buf->rsp.status));
           NT_ASSERT(!extra_info_flag);
@@ -656,32 +642,25 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
         }
       }
       
-      if (!head_buf)
-      {
+      if (!head_buf) {
         head_buf = page_buf;
         tail_buf = page_buf;
-      }
-      else
-      {
+      } else {
         tail_buf->next = page_buf;
         tail_buf = page_buf;
       }
       page_buf->next = NULL;
 
-      if (extra_info_flag)
-      {
+      if (extra_info_flag) {
         ei = (struct netif_extra_info *)&page_buf->rsp;
         extra_info_flag = ei->flags & XEN_NETIF_EXTRA_FLAG_MORE;
-      }
-      else
-      {
+      } else {
         more_data_flag = (BOOLEAN)(page_buf->rsp.flags & NETRXF_more_data);
         extra_info_flag = (BOOLEAN)(page_buf->rsp.flags & NETRXF_extra_info);
         interim_packet_data += page_buf->rsp.status;
       }
       
-      if (!extra_info_flag && !more_data_flag)
-      {
+      if (!extra_info_flag && !more_data_flag) {
         last_buf = page_buf;
         packet_count++;
         packet_data += interim_packet_data;
@@ -698,8 +677,7 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
       break;
 
     more_to_do = RING_HAS_UNCONSUMED_RESPONSES(&xi->rx_ring);
-    if (!more_to_do)
-    {
+    if (!more_to_do) {
       xi->rx_ring.sring->rsp_event = xi->rx_ring.rsp_cons + 1;
       KeMemoryBarrier();
       more_to_do = RING_HAS_UNCONSUMED_RESPONSES(&xi->rx_ring);
@@ -833,90 +811,31 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
   return dont_set_event;
 }
 
-/*
-   Free all Rx buffers (on halt, for example) 
-   The ring must be stopped at this point.
-*/
-
-static VOID
-XenNet_PurgeRing(xennet_info_t *xi)
-{
-  int i;
-  for (i = 0; i < NET_RX_RING_SIZE; i++)
-  {
-    if (xi->rx_ring_pbs[i] != NULL)
-    {
-      put_pb_on_freelist(xi, xi->rx_ring_pbs[i]);
-      xi->rx_ring_pbs[i] = NULL;
-    }
-  }
-}
-
 static VOID
 XenNet_BufferFree(xennet_info_t *xi)
 {
   shared_buffer_t *sb;
+  int i;
 
-  XenNet_PurgeRing(xi);
+  for (i = 0; i < NET_RX_RING_SIZE; i++) {
+    if (xi->rx_ring_pbs[i] != NULL) {
+      put_pb_on_freelist(xi, xi->rx_ring_pbs[i]);
+      xi->rx_ring_pbs[i] = NULL;
+    }
+  }
 
   /* because we are shutting down this won't allocate new ones */
-  while ((sb = get_pb_from_freelist(xi)) != NULL)
-  {
+  while ((sb = get_pb_from_freelist(xi)) != NULL) {
     XnEndAccess(xi->handle,
         sb->gref, FALSE, (ULONG)'XNRX');
     IoFreeMdl(sb->mdl);
     NdisFreeMemory(sb->virtual, sizeof(shared_buffer_t), 0);
     NdisFreeMemory(sb, PAGE_SIZE, 0);
   }
-  while ((sb = get_hb_from_freelist(xi)) != NULL)
-  {
+  while ((sb = get_hb_from_freelist(xi)) != NULL) {
     IoFreeMdl(sb->mdl);
     NdisFreeMemory(sb, sizeof(shared_buffer_t) + MAX_ETH_HEADER_LENGTH + MAX_LOOKAHEAD_LENGTH, 0);
   }
-}
-
-VOID
-XenNet_BufferAlloc(xennet_info_t *xi)
-{
-  //NDIS_STATUS status;
-  int i;
-  
-  xi->rx_id_free = NET_RX_RING_SIZE;
-  xi->rx_outstanding = 0;
-
-  for (i = 0; i < NET_RX_RING_SIZE; i++)
-  {
-    xi->rx_ring_pbs[i] = NULL;
-  }
-}
-
-VOID
-XenNet_RxResumeStart(xennet_info_t *xi)
-{
-  KIRQL old_irql;
-
-  FUNCTION_ENTER();
-
-  KeAcquireSpinLock(&xi->rx_lock, &old_irql);
-  XenNet_PurgeRing(xi);
-  KeReleaseSpinLock(&xi->rx_lock, old_irql);
-  
-  FUNCTION_EXIT();
-}
-
-VOID
-XenNet_RxResumeEnd(xennet_info_t *xi)
-{
-  KIRQL old_irql;
-
-  FUNCTION_ENTER();
-
-  KeAcquireSpinLock(&xi->rx_lock, &old_irql);
-  //XenNet_BufferAlloc(xi);
-  XenNet_FillRing(xi);
-  KeReleaseSpinLock(&xi->rx_lock, old_irql);
-  
-  FUNCTION_EXIT();
 }
 
 BOOLEAN
@@ -925,37 +844,40 @@ XenNet_RxInit(xennet_info_t *xi)
   NET_BUFFER_LIST_POOL_PARAMETERS nbl_pool_parameters;
   NET_BUFFER_POOL_PARAMETERS nb_pool_parameters;
   int ret;
-
+  int i;
+  
   FUNCTION_ENTER();
 
-  xi->rx_shutting_down = FALSE;
+  // this stuff needs to be done once only...
   KeInitializeSpinLock(&xi->rx_lock);
   KeInitializeEvent(&xi->packet_returned_event, SynchronizationEvent, FALSE);
   xi->rxpi = NdisAllocateMemoryWithTagPriority(xi->adapter_handle, sizeof(packet_info_t) * NdisSystemProcessorCount(), XENNET_POOL_TAG, NormalPoolPriority);
-  if (!xi->rxpi)
-  {
+  if (!xi->rxpi) {
     KdPrint(("NdisAllocateMemoryWithTagPriority failed\n"));
     return FALSE;
   }
   NdisZeroMemory(xi->rxpi, sizeof(packet_info_t) * NdisSystemProcessorCount());
 
   ret = stack_new(&xi->rx_pb_stack, NET_RX_RING_SIZE * 4);
-  if (!ret)
-  {
+  if (!ret) {
     FUNCTION_MSG("Failed to allocate rx_pb_stack\n");
     NdisFreeMemory(xi->rxpi, sizeof(packet_info_t) * NdisSystemProcessorCount(), 0);
     return FALSE;
   }
   stack_new(&xi->rx_hb_stack, NET_RX_RING_SIZE * 4);
-  if (!ret)
-  {
+  if (!ret) {
     FUNCTION_MSG("Failed to allocate rx_hb_stack\n");
     stack_delete(xi->rx_pb_stack, NULL, NULL);
     NdisFreeMemory(xi->rxpi, sizeof(packet_info_t) * NdisSystemProcessorCount(), 0);
     return FALSE;
   }
 
-  XenNet_BufferAlloc(xi);
+  xi->rx_id_free = NET_RX_RING_SIZE;
+  xi->rx_outstanding = 0;
+
+  for (i = 0; i < NET_RX_RING_SIZE; i++) {
+    xi->rx_ring_pbs[i] = NULL;
+  }
   
   nbl_pool_parameters.Header.Type = NDIS_OBJECT_TYPE_DEFAULT;
   nbl_pool_parameters.Header.Revision = NET_BUFFER_LIST_POOL_PARAMETERS_REVISION_1;
@@ -967,8 +889,7 @@ XenNet_RxInit(xennet_info_t *xi)
   nbl_pool_parameters.DataSize = 0; /* NET_BUFFERS are always allocated separately */
   
   xi->rx_nbl_pool = NdisAllocateNetBufferListPool(xi->adapter_handle, &nbl_pool_parameters);
-  if (!xi->rx_nbl_pool)
-  {
+  if (!xi->rx_nbl_pool) {
     KdPrint(("NdisAllocateNetBufferListPool failed\n"));
     return FALSE;
   }
@@ -979,8 +900,7 @@ XenNet_RxInit(xennet_info_t *xi)
   nb_pool_parameters.PoolTag = XENNET_POOL_TAG;
   nb_pool_parameters.DataSize = 0; /* the buffers come from the ring */
   xi->rx_nb_pool = NdisAllocateNetBufferPool(xi->adapter_handle, &nb_pool_parameters);
-  if (!xi->rx_nb_pool)
-  {
+  if (!xi->rx_nb_pool) {
     KdPrint(("NdisAllocateNetBufferPool (rx_nb_pool) failed\n"));
     return FALSE;
   }
@@ -992,39 +912,32 @@ XenNet_RxInit(xennet_info_t *xi)
   return TRUE;
 }
 
-BOOLEAN
-XenNet_RxShutdown(xennet_info_t *xi)
-{
+VOID
+XenNet_RxShutdown(xennet_info_t *xi) {
   KIRQL old_irql;
-  //PNDIS_PACKET packet;
   UNREFERENCED_PARAMETER(xi);
 
   FUNCTION_ENTER();
 
   KeAcquireSpinLock(&xi->rx_lock, &old_irql);
-  xi->rx_shutting_down = TRUE;
-  KeReleaseSpinLock(&xi->rx_lock, old_irql);
-
-  KeFlushQueuedDpcs();
-
-  while (xi->rx_outstanding)
-  {
+  while (xi->rx_outstanding) {
     KdPrint((__DRIVER_NAME "     Waiting for all packets to be returned\n"));
-    KeWaitForSingleObject(&xi->packet_returned_event, Executive, KernelMode, FALSE, NULL);
+    KeReleaseSpinLock(&xi->rx_lock, old_irql);
+    KeWaitForSingleObject(&xi->rx_idle_event, Executive, KernelMode, FALSE, NULL);
+    KeAcquireSpinLock(&xi->rx_lock, &old_irql);
   }
-
-  NdisFreeMemory(xi->rxpi, sizeof(packet_info_t) * NdisSystemProcessorCount(), 0);
-
+  KeReleaseSpinLock(&xi->rx_lock, old_irql);
+  
   XenNet_BufferFree(xi);
-
 
   stack_delete(xi->rx_pb_stack, NULL, NULL);
   stack_delete(xi->rx_hb_stack, NULL, NULL);
   
+  NdisFreeMemory(xi->rxpi, sizeof(packet_info_t) * NdisSystemProcessorCount(), 0);
+
   NdisFreeNetBufferPool(xi->rx_nb_pool);
   NdisFreeNetBufferListPool(xi->rx_nbl_pool);
 
   FUNCTION_EXIT();
-
-  return TRUE;
+  return;
 }
