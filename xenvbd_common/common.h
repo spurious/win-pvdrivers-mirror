@@ -66,4 +66,3 @@ typedef struct {
   LARGE_INTEGER ring_submit_time;
   #endif
 } blkif_shadow_t;
-

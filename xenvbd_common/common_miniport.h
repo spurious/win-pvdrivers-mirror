@@ -47,8 +47,8 @@ get_shadow_from_freelist(PXENVBD_DEVICE_DATA xvdd)
     return NULL;
   }
   xvdd->shadow_free--;
-  if (xvdd->shadow_free < xvdd->shadow_min_free)
-    xvdd->shadow_min_free = xvdd->shadow_free;
+  //if (xvdd->shadow_free < xvdd->shadow_min_free)
+  //  xvdd->shadow_min_free = xvdd->shadow_free;
   return &xvdd->shadows[xvdd->shadow_free_list[xvdd->shadow_free]];
 }
 
@@ -172,8 +172,7 @@ XenVbd_MakeAutoSense(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb)
 
 /* called with StartIo lock held */
 static VOID
-XenVbd_HandleEvent(PXENVBD_DEVICE_DATA xvdd)
-{
+XenVbd_HandleEvent(PXENVBD_DEVICE_DATA xvdd) {
   PSCSI_REQUEST_BLOCK srb;
   RING_IDX i, rp;
   ULONG j;
@@ -193,13 +192,14 @@ XenVbd_HandleEvent(PXENVBD_DEVICE_DATA xvdd)
       rep = XenVbd_GetResponse(xvdd, i);
       shadow = &xvdd->shadows[rep->id & SHADOW_ID_ID_MASK];
       if (shadow->reset) {
-        KdPrint((__DRIVER_NAME "     discarding reset shadow\n"));
+        /* the srb's here have already been returned */
+        FUNCTION_MSG("discarding reset shadow\n");
         for (j = 0; j < shadow->req.nr_segments; j++) {
           XnEndAccess(xvdd->handle,
             shadow->req.seg[j].gref, FALSE, xvdd->grant_tag);
         }
       } else if (dump_mode && !(rep->id & SHADOW_ID_DUMP_FLAG)) {
-        KdPrint((__DRIVER_NAME "     discarding stale (non-dump-mode) shadow\n"));
+        FUNCTION_MSG("discarding stale (non-dump-mode) shadow\n");
       } else {
         srb = shadow->srb;
         NT_ASSERT(srb);
@@ -226,7 +226,7 @@ XenVbd_HandleEvent(PXENVBD_DEVICE_DATA xvdd)
           XnEndAccess(xvdd->handle, shadow->req.seg[j].gref, FALSE, xvdd->grant_tag);
         }
         srb_entry->outstanding_requests--;
-        if (!srb_entry->outstanding_requests && srb_entry->offset == srb_entry->length) {
+        if (srb_entry->outstanding_requests == 0 && srb_entry->offset == srb_entry->length) {
           if (srb_entry->error) {
             srb->SrbStatus = SRB_STATUS_ERROR;
             srb->ScsiStatus = 0x02;
@@ -236,38 +236,41 @@ XenVbd_HandleEvent(PXENVBD_DEVICE_DATA xvdd)
           }
           //FUNCTION_MSG("Completing Srb = %p\n", srb);
           SxxxPortNotification(RequestComplete, xvdd, srb);
-          SxxxPortNotification(NextLuRequest, xvdd, 0, 0, 0);
         }
       }
       put_shadow_on_freelist(xvdd, shadow);
     }
 
     xvdd->ring.rsp_cons = i;
-    if (i != xvdd->ring.req_prod_pvt) {
-      RING_FINAL_CHECK_FOR_RESPONSES(&xvdd->ring, more_to_do);
-    } else {
-      xvdd->ring.sring->rsp_event = i + 1;
+    if (i == xvdd->ring.req_prod_pvt) {
+      /* all possible requests complete - can't have more responses than requests */
       more_to_do = FALSE;
+      xvdd->ring.sring->rsp_event = i + 1;
+    } else {
+      more_to_do = RING_HAS_UNCONSUMED_RESPONSES(&xvdd->ring);
+      if (!more_to_do) {
+        xvdd->ring.sring->rsp_event = i + max(1, (SHADOW_ENTRIES - xvdd->shadow_free) / 2);
+        more_to_do = RING_HAS_UNCONSUMED_RESPONSES(&xvdd->ring);
+      }
     }
   }
 
+#if 0
   if (dump_mode || xvdd->device_state == DEVICE_STATE_ACTIVE) {
     XenVbd_ProcessSrbList(xvdd);
-  } else if (xvdd->shadow_free == SHADOW_ENTRIES) {
-    FUNCTION_MSG("ring now empty - scheduling workitem for disconnect\n");
+  } else
+#endif
+  if (xvdd->device_state != DEVICE_STATE_ACTIVE && xvdd->shadow_free == SHADOW_ENTRIES) {
+    FUNCTION_MSG("ring now empty - comleting disconnect\n");
     XenVbd_CompleteDisconnect(xvdd);
-    //IoQueueWorkItem(xvdd->disconnect_workitem, XenVbd_DisconnectWorkItem, DelayedWorkQueue, xvdd);
   }
-  //if (dump_mode)
-  //FUNCTION_EXIT();
   return;
 }
 
 /* called with StartIoLock held */
 /* returns TRUE if something was put on the ring and notify might be required */
 static BOOLEAN
-XenVbd_PutSrbOnRing(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb)
-{
+XenVbd_PutSrbOnRing(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
   srb_list_entry_t *srb_entry = srb->SrbExtension;
   /* sector_number and block_count are the adjusted-to-512-byte-sector values */
   ULONGLONG sector_number;
@@ -455,8 +458,7 @@ XenVbd_PutSrbOnRing(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb)
 
 
 static ULONG
-XenVbd_FillModePage(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb)
-{
+XenVbd_FillModePage(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
   PMODE_PARAMETER_HEADER parameter_header = NULL;
   PMODE_PARAMETER_HEADER10 parameter_header10 = NULL;
   PMODE_PARAMETER_BLOCK param_block;
@@ -477,8 +479,7 @@ XenVbd_FillModePage(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb)
 
   //KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
   
-  switch (srb->Cdb[0])
-  {
+  switch (srb->Cdb[0]) {
   case SCSIOP_MODE_SENSE:
     cdb_llbaa = FALSE;
     cdb_dbd = (BOOLEAN)!!(srb->Cdb[1] & 8);
@@ -487,8 +488,7 @@ XenVbd_FillModePage(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb)
     parameter_header = (PMODE_PARAMETER_HEADER)&buffer[offset];
     parameter_header->MediumType = 0;
     parameter_header->DeviceSpecificParameter = 0;
-    if (xvdd->device_mode == XENVBD_DEVICEMODE_READ)
-    {
+    if (xvdd->device_mode == XENVBD_DEVICEMODE_READ) {
       KdPrint((__DRIVER_NAME " Mode sense to a read only disk.\n"));
       parameter_header->DeviceSpecificParameter |= MODE_DSP_WRITE_PROTECT; 
     }
@@ -514,20 +514,15 @@ XenVbd_FillModePage(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb)
     return FALSE;
   }  
   
-  if (!cdb_dbd)
-  {
+  if (!cdb_dbd) {
     param_block = (PMODE_PARAMETER_BLOCK)&buffer[offset];
-    if (xvdd->device_type == XENVBD_DEVICETYPE_DISK)
-    {
-      if (xvdd->total_sectors >> 32) 
-      {
+    if (xvdd->device_type == XENVBD_DEVICETYPE_DISK) {
+      if (xvdd->total_sectors >> 32) {
         param_block->DensityCode = 0xff;
         param_block->NumberOfBlocks[0] = 0xff;
         param_block->NumberOfBlocks[1] = 0xff;
         param_block->NumberOfBlocks[2] = 0xff;
-      }
-      else
-      {
+      } else {
         param_block->DensityCode = (UCHAR)((xvdd->total_sectors >> 24) & 0xff);
         param_block->NumberOfBlocks[0] = (UCHAR)((xvdd->total_sectors >> 16) & 0xff);
         param_block->NumberOfBlocks[1] = (UCHAR)((xvdd->total_sectors >> 8) & 0xff);
@@ -549,8 +544,7 @@ XenVbd_FillModePage(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb)
     parameter_header10->BlockDescriptorLength[1] = (UCHAR)(offset - sizeof(MODE_PARAMETER_HEADER10));
     break;
   }
-  if (xvdd->device_type == XENVBD_DEVICETYPE_DISK && (cdb_page_code == MODE_PAGE_FORMAT_DEVICE || cdb_page_code == MODE_SENSE_RETURN_ALL))
-  {
+  if (xvdd->device_type == XENVBD_DEVICETYPE_DISK && (cdb_page_code == MODE_PAGE_FORMAT_DEVICE || cdb_page_code == MODE_SENSE_RETURN_ALL)) {
     valid_page = TRUE;
     format_page = (PMODE_FORMAT_PAGE)&buffer[offset];
     format_page->PageCode = MODE_PAGE_FORMAT_DEVICE;
@@ -565,8 +559,7 @@ XenVbd_FillModePage(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb)
     format_page->SoftSectorFormating = TRUE;
     offset += sizeof(MODE_FORMAT_PAGE);
   }
-  if (xvdd->device_type == XENVBD_DEVICETYPE_DISK && (cdb_page_code == MODE_PAGE_CACHING || cdb_page_code == MODE_SENSE_RETURN_ALL))
-  {
+  if (xvdd->device_type == XENVBD_DEVICETYPE_DISK && (cdb_page_code == MODE_PAGE_CACHING || cdb_page_code == MODE_SENSE_RETURN_ALL)) {
     PMODE_CACHING_PAGE caching_page;
     valid_page = TRUE;
     caching_page = (PMODE_CACHING_PAGE)&buffer[offset];
@@ -575,8 +568,7 @@ XenVbd_FillModePage(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb)
     // caching_page-> // all zeros is just fine... maybe
     offset += sizeof(MODE_CACHING_PAGE);
   }
-  if (xvdd->device_type == XENVBD_DEVICETYPE_DISK && (cdb_page_code == MODE_PAGE_MEDIUM_TYPES || cdb_page_code == MODE_SENSE_RETURN_ALL))
-  {
+  if (xvdd->device_type == XENVBD_DEVICETYPE_DISK && (cdb_page_code == MODE_PAGE_MEDIUM_TYPES || cdb_page_code == MODE_SENSE_RETURN_ALL)) {
     PUCHAR medium_types_page;
     valid_page = TRUE;
     medium_types_page = &buffer[offset];
@@ -590,8 +582,7 @@ XenVbd_FillModePage(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb)
     medium_types_page[7] = 0;
     offset += 8;
   }
-  switch (srb->Cdb[0])
-  {
+  switch (srb->Cdb[0]) {
   case SCSIOP_MODE_SENSE:
     parameter_header->ModeDataLength = (UCHAR)(offset - 1);
     break;
@@ -601,8 +592,7 @@ XenVbd_FillModePage(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb)
     break;
   }
 
-  if (!valid_page && cdb_page_code != MODE_SENSE_RETURN_ALL)
-  {
+  if (!valid_page && cdb_page_code != MODE_SENSE_RETURN_ALL) {
     srb->SrbStatus = SRB_STATUS_ERROR;
   }
   else if(offset < srb->DataTransferLength)
@@ -639,12 +629,13 @@ XenVbd_ResetBus(PXENVBD_DEVICE_DATA xvdd, ULONG PathId) {
 
   /* It appears that the StartIo spinlock is already held at this point */
 
-  KdPrint((__DRIVER_NAME "     IRQL = %d\n", KeGetCurrentIrql()));
+  FUNCTION_MSG("IRQL = %d\n", KeGetCurrentIrql());
 
   xvdd->aligned_buffer_in_use = FALSE;
   
   InitializeListHead(&srb_reset_list);
   
+  /* add all queued srbs to the list */
   while((list_entry = RemoveHeadList(&xvdd->srb_list)) != &xvdd->srb_list) {
     #if DBG
     srb_list_entry_t *srb_entry = CONTAINING_RECORD(list_entry, srb_list_entry_t, list_entry);
@@ -653,6 +644,7 @@ XenVbd_ResetBus(PXENVBD_DEVICE_DATA xvdd, ULONG PathId) {
     InsertTailList(&srb_reset_list, list_entry);
   }
   
+  /* add any in-flight srbs that aren't already on the list (could be multiple shadows per srb if it's been broken up */
   for (i = 0; i < MAX_SHADOW_ENTRIES; i++) {
     if (xvdd->shadows[i].srb) {
       srb_list_entry_t *srb_entry = xvdd->shadows[i].srb->SrbExtension;
@@ -661,7 +653,7 @@ XenVbd_ResetBus(PXENVBD_DEVICE_DATA xvdd, ULONG PathId) {
           break;
       }
       if (list_entry == &srb_reset_list) {
-        KdPrint((__DRIVER_NAME "     adding in-flight SRB %p to reset list\n", srb_entry->srb));
+        FUNCTION_MSG("adding in-flight SRB %p to reset list\n", srb_entry->srb);
         InsertTailList(&srb_reset_list, &srb_entry->list_entry);
       }
       /* set reset here so that the interrupt won't do anything with the srb but will dispose of the shadow entry correctly */
@@ -673,8 +665,9 @@ XenVbd_ResetBus(PXENVBD_DEVICE_DATA xvdd, ULONG PathId) {
 
   while((list_entry = RemoveHeadList(&srb_reset_list)) != &srb_reset_list) {
     srb_list_entry_t *srb_entry = CONTAINING_RECORD(list_entry, srb_list_entry_t, list_entry);
+    srb_entry->outstanding_requests = 0;
     srb_entry->srb->SrbStatus = SRB_STATUS_BUS_RESET;
-    KdPrint((__DRIVER_NAME "     completing SRB %p with status SRB_STATUS_BUS_RESET\n", srb_entry->srb));
+    FUNCTION_MSG("completing SRB %p with status SRB_STATUS_BUS_RESET\n", srb_entry->srb);
     SxxxPortNotification(RequestComplete, xvdd, srb_entry->srb);
   }
 
@@ -703,6 +696,7 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
   PSCSI_REQUEST_BLOCK srb;
   srb_list_entry_t *srb_entry;
   PSRB_IO_CONTROL sic;
+  ULONG prev_offset;
 
   if (xvdd->device_state != DEVICE_STATE_ACTIVE) {
     FUNCTION_MSG("Not yet active - state = %d\n", xvdd->device_state);
@@ -711,6 +705,7 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
 
   while(!xvdd->aligned_buffer_in_use && xvdd->shadow_free && (srb_entry = (srb_list_entry_t *)RemoveHeadList(&xvdd->srb_list)) != (srb_list_entry_t *)&xvdd->srb_list) {
     srb = srb_entry->srb;
+    prev_offset = srb_entry->offset;
     if (xvdd->device_state == DEVICE_STATE_INACTIVE) {
       /* need to check again as may have been initialising when this srb was put on the list */
       FUNCTION_MSG("Inactive Device (in ProcessSrbList)\n");
@@ -721,8 +716,7 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
 
     data_transfer_length = srb->DataTransferLength;
     
-    switch (srb->Function)
-    {
+    switch (srb->Function) {
     case SRB_FUNCTION_EXECUTE_SCSI:
       cdb = (PCDB)srb->Cdb;
 
@@ -1234,6 +1228,7 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
     case SRB_FUNCTION_RESET_DEVICE:
     case SRB_FUNCTION_RESET_LOGICAL_UNIT:
       /* the path doesn't matter here - only ever one device*/
+      FUNCTION_MSG("SRB_FUNCTION_RESET_XXX\n");
       XenVbd_ResetBus(xvdd, 0);
       srb->SrbStatus = SRB_STATUS_SUCCESS;
       SxxxPortNotification(RequestComplete, xvdd, srb);    
@@ -1255,6 +1250,11 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
       SxxxPortNotification(RequestComplete, xvdd, srb);
       break;
     }
+    if ((PLIST_ENTRY)srb_entry == xvdd->srb_list.Flink && srb_entry->offset == prev_offset) {
+      FUNCTION_MSG("Same entry\n");
+      /* same entry was put back onto the head of the list so we can't progress */
+      break;
+    }
   }
   if (notify) {
     notify = FALSE;
@@ -1265,4 +1265,3 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
   }
   return;
 }
-

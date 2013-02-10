@@ -38,18 +38,30 @@ static ULONG dump_mode_errors = 0;
 #define StorPortAcquireSpinLock(...) {}
 #define StorPortReleaseSpinLock(...) {}
 
-#define SxxxPortNotification(NotificationType, DeviceExtension, ...) \
-{ \
-  if (NotificationType == RequestComplete) ((PXENVBD_SCSIPORT_DATA)((PXENVBD_DEVICE_DATA)DeviceExtension)->xvsd)->outstanding--; \
-  ScsiPortNotification(NotificationType, ((PXENVBD_DEVICE_DATA)DeviceExtension)->xvsd, __VA_ARGS__); \
+#define SxxxPortNotification(NotificationType, DeviceExtension, ...) XenVbd_Notification##NotificationType(DeviceExtension, __VA_ARGS__)
+
+VOID
+XenVbd_NotificationRequestComplete(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
+  PXENVBD_SCSIPORT_DATA xvsd = (PXENVBD_SCSIPORT_DATA)xvdd->xvsd;
+  srb_list_entry_t *srb_entry = srb->SrbExtension;
+  if (srb_entry->outstanding_requests != 0) {
+    FUNCTION_MSG("srb outstanding_requests = %d\n", srb_entry->outstanding_requests);
+  }
+  xvsd->outstanding--;
+  ScsiPortNotification(RequestComplete, xvsd, srb);
+}
+
+VOID
+XenVbd_NotificationNextLuRequest(PXENVBD_DEVICE_DATA xvdd, UCHAR PathId, UCHAR TargetId, UCHAR Lun) {
+  ScsiPortNotification(NextLuRequest, xvdd->xvsd, PathId, TargetId, Lun);
 }
 
 #include "..\xenvbd_common\common_miniport.h"
 
+
 /* called in non-dump mode */
 static ULONG
-XenVbd_HwScsiFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInformation, PCHAR ArgumentString, PPORT_CONFIGURATION_INFORMATION ConfigInfo, PBOOLEAN Again)
-{
+XenVbd_HwScsiFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInformation, PCHAR ArgumentString, PPORT_CONFIGURATION_INFORMATION ConfigInfo, PBOOLEAN Again) {
   //NTSTATUS status;
   PXENVBD_SCSIPORT_DATA xvsd = (PXENVBD_SCSIPORT_DATA)DeviceExtension;
   PXENVBD_DEVICE_DATA xvdd;
@@ -63,6 +75,13 @@ XenVbd_HwScsiFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInform
   KdPrint((__DRIVER_NAME "     IRQL = %d\n", KeGetCurrentIrql()));
   KdPrint((__DRIVER_NAME "     xvsd = %p\n", xvsd));
 
+  if (dump_mode) {
+    if (xvsd->xvdd->device_state != DEVICE_STATE_ACTIVE) {
+      /* if we are not connected to the ring when we start dump mode then there is nothing we can do */
+      FUNCTION_MSG("Cannot connect backend in dump mode - state = %d\n", xvsd->xvdd->device_state);
+      return SP_RETURN_ERROR;
+    }
+  }
   if (ConfigInfo->NumberOfAccessRanges != 1) {
     FUNCTION_MSG("NumberOfAccessRanges wrong\n");
     FUNCTION_EXIT();
@@ -125,8 +144,7 @@ XenVbd_HwScsiFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInform
 
 /* Called at PASSIVE_LEVEL for non-dump mode */
 static BOOLEAN
-XenVbd_HwScsiInitialize(PVOID DeviceExtension)
-{
+XenVbd_HwScsiInitialize(PVOID DeviceExtension) {
   PXENVBD_SCSIPORT_DATA xvsd = (PXENVBD_SCSIPORT_DATA)DeviceExtension;
   PXENVBD_DEVICE_DATA xvdd = (PXENVBD_DEVICE_DATA)xvsd->xvdd;
   ULONG i;
@@ -162,6 +180,7 @@ XenVbd_HwScsiInterrupt(PVOID DeviceExtension)
 {
   PXENVBD_SCSIPORT_DATA xvsd = DeviceExtension;
   XenVbd_HandleEvent(xvsd->xvdd);
+  //SxxxPortNotification(NextLuRequest, xvdd, 0, 0, 0);
   return TRUE;
 }
 
@@ -185,14 +204,14 @@ XenVbd_CompleteDisconnect(PXENVBD_DEVICE_DATA xvdd) {
 }
 
 static BOOLEAN
-XenVbd_HwScsiStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
-{
+XenVbd_HwScsiStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb) {
   PXENVBD_SCSIPORT_DATA xvsd = DeviceExtension;
   PXENVBD_DEVICE_DATA xvdd = (PXENVBD_DEVICE_DATA)xvsd->xvdd;
   PSRB_IO_CONTROL sic;
 
-  //FUNCTION_ENTER();
-  //FUNCTION_MSG("HwScsiStartIo Srb = %p, PathId = %d, TargetId = %d, Lun = %d\n", srb, srb->PathId, srb->TargetId, srb->Lun);
+  if ((LONG)xvsd->outstanding < 0) {
+    FUNCTION_MSG("HwScsiStartIo outstanding = %d\n", xvsd->outstanding);
+  }
   if (srb->PathId != 0 || srb->TargetId != 0 || srb->Lun != 0) {
     FUNCTION_MSG("HwScsiStartIo (Out of bounds - PathId = %d, TargetId = %d, Lun = %d)\n", srb->PathId, srb->TargetId, srb->Lun);
     srb->SrbStatus = SRB_STATUS_NO_DEVICE;
@@ -201,23 +220,26 @@ XenVbd_HwScsiStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
     sic = srb->DataBuffer;
     switch(sic->ControlCode) {
     case XENVBD_CONTROL_EVENT:
-      XenVbd_HandleEvent(xvdd);
       srb->SrbStatus = SRB_STATUS_SUCCESS;
       ScsiPortNotification(RequestComplete, xvsd, srb);
+      break;
     case XENVBD_CONTROL_STOP:
       if (xvdd->shadow_free == SHADOW_ENTRIES) {
         srb->SrbStatus = SRB_STATUS_SUCCESS;
         ScsiPortNotification(RequestComplete, xvsd, srb);
+        FUNCTION_MSG("CONTROL_STOP done\n");
       } else {
         xvsd->stop_srb = srb;
+        FUNCTION_MSG("CONTROL_STOP pended\n");
       }
       break;
     case XENVBD_CONTROL_START:
-      XenVbd_ProcessSrbList(xvdd);
+      // we might need to reload a few things here...
+      ScsiPortNotification(RequestComplete, xvsd, srb);
       break;
     default:
       FUNCTION_MSG("XENVBD_CONTROL_%d\n", sic->ControlCode);
-      srb->SrbStatus = SRB_STATUS_SUCCESS;
+      srb->SrbStatus = SRB_STATUS_ERROR;
       ScsiPortNotification(RequestComplete, xvsd, srb);
       break;
     }
@@ -228,15 +250,16 @@ XenVbd_HwScsiStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
   } else {
     xvsd->outstanding++;
     XenVbd_PutSrbOnList(xvdd, srb);
-    XenVbd_ProcessSrbList(xvdd);
   }
-  /* need 2 spare slots - 1 for EVENT and one for STOP/START */
+  XenVbd_HandleEvent(xvdd); /* drain the ring */
+  XenVbd_ProcessSrbList(xvdd); /* put new requests on */
+  XenVbd_HandleEvent(xvdd); /* drain the ring again and also set event based on requests just added */
+  /* need 2 spare slots - 1 for EVENT and 1 for STOP/START */
   if (xvsd->outstanding < 30) {
-    ScsiPortNotification(NextLuRequest, xvsd, srb->PathId, srb->TargetId, srb->Lun);
+    ScsiPortNotification(NextLuRequest, xvsd, 0, 0, 0);
   } else {
     ScsiPortNotification(NextRequest, xvsd);
   }
-  //FUNCTION_EXIT();
   return TRUE;
 }
 
@@ -247,7 +270,6 @@ XenVbd_HwScsiAdapterControl(PVOID DeviceExtension, SCSI_ADAPTER_CONTROL_TYPE Con
   PXENVBD_DEVICE_DATA xvdd = (PXENVBD_DEVICE_DATA)xvsd->xvdd;
   SCSI_ADAPTER_CONTROL_STATUS Status = ScsiAdapterControlSuccess;
   PSCSI_SUPPORTED_CONTROL_TYPE_LIST SupportedControlTypeList;
-  //KIRQL OldIrql;
 
   FUNCTION_ENTER();
   KdPrint((__DRIVER_NAME "     IRQL = %d\n", KeGetCurrentIrql()));
@@ -273,8 +295,7 @@ XenVbd_HwScsiAdapterControl(PVOID DeviceExtension, SCSI_ADAPTER_CONTROL_TYPE Con
     break;
   case ScsiRestartAdapter:
     KdPrint((__DRIVER_NAME "     ScsiRestartAdapter\n"));
-    if (xvdd->device_state == DEVICE_STATE_INACTIVE)
-    {
+    if (xvdd->device_state == DEVICE_STATE_INACTIVE) {
       KdPrint((__DRIVER_NAME "     inactive - nothing to do\n"));
       break;
     }
@@ -304,6 +325,7 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
   
   /* RegistryPath == NULL when we are invoked as a crash dump driver */
   if (!RegistryPath) {
+    KdPrint((__DRIVER_NAME "     IRQL = %d (if you can read this we aren't in dump mode)\n", KeGetCurrentIrql()));
     dump_mode = TRUE;
     // TODO: what if hibernate and not dump?
     XnDumpModeHookDebugPrint();

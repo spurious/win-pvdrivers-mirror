@@ -56,7 +56,7 @@ struct {
   blkif_shadow_t shadows[MAX_SHADOW_ENTRIES];
   USHORT shadow_free_list[MAX_SHADOW_ENTRIES];
   USHORT shadow_free;
-  USHORT shadow_min_free;
+  //USHORT shadow_min_free;
   ULONG grant_tag;
   LIST_ENTRY srb_list;
   BOOLEAN aligned_buffer_in_use;

@@ -1,5 +1,5 @@
 !INCLUDE "..\common.inc"
-TARGETNAME=xenvbd_filter
+TARGETNAME=xenvbdfilter
 INF_NAME=xenvbd_filter
 TARGETTYPE=DRIVER
 KMDF_VERSION_MAJOR=1
