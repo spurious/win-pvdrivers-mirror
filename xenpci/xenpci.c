@@ -330,35 +330,29 @@ XenPci_EvtDeviceAdd_XenHide(WDFDRIVER driver, PWDFDEVICE_INIT device_init)
   FUNCTION_ENTER();
 
   status = WdfFdoInitAllocAndQueryProperty(device_init, DevicePropertyDeviceDescription, NonPagedPool, WDF_NO_OBJECT_ATTRIBUTES, &memory);
-  if (NT_SUCCESS(status))
-  {
+  if (NT_SUCCESS(status)) {
     device_description = WdfMemoryGetBuffer(memory, NULL);
-  }
-  else
-  {
+  } else {
     device_description = L"<unknown device>";
   }
-
-  for (i = 0; i < WdfCollectionGetCount(qemu_hide_devices); i++)
-  {
+  
+  for (i = 0; i < WdfCollectionGetCount(qemu_hide_devices); i++) {
     WDFSTRING wdf_string = WdfCollectionGetItem(qemu_hide_devices, i);
     UNICODE_STRING unicode_string;
     WdfStringGetUnicodeString(wdf_string, &unicode_string);
-    if (XenPci_IdSuffixMatches(device_init, unicode_string.Buffer))
-    {
+    if (XenPci_IdSuffixMatches(device_init, unicode_string.Buffer)) {
       hide_required = TRUE;
       break;
     }
   }
-  if (!hide_required)
-  {
+  if (!hide_required) {
+    FUNCTION_MSG("(filter not required for %S)\n", device_description);
     WdfObjectDelete(memory);
-    KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ " (filter not required for %S)\n", device_description));
     return STATUS_SUCCESS;
   }
   
-  KdPrint((__DRIVER_NAME "     Installing Filter for %S\n", device_description));
-
+  FUNCTION_MSG("Installing Filter for %S\n", device_description);
+  
   WdfFdoInitSetFilter(device_init);
   WdfDeviceInitSetDeviceType(device_init, FILE_DEVICE_UNKNOWN);
   WdfDeviceInitSetExclusive(device_init, FALSE);
@@ -369,9 +363,8 @@ XenPci_EvtDeviceAdd_XenHide(WDFDRIVER driver, PWDFDEVICE_INIT device_init)
   
   WDF_OBJECT_ATTRIBUTES_INIT(&device_attributes);
   status = WdfDeviceCreate(&device_init, &device_attributes, &device);
-  if (!NT_SUCCESS(status))
-  {
-    KdPrint(("Error creating device %08x\n", status));
+  if (!NT_SUCCESS(status)) {
+    FUNCTION_MSG("Error creating device %08x\n", status);
     WdfObjectDelete(memory);
     FUNCTION_EXIT();
     return status;
@@ -386,18 +379,15 @@ XenPci_EvtDeviceAdd_XenHide(WDFDRIVER driver, PWDFDEVICE_INIT device_init)
 static NTSTATUS
 XenPci_EvtDeviceAdd(WDFDRIVER driver, PWDFDEVICE_INIT device_init)
 {
-  if (XenPci_IdSuffixMatches(device_init, L"VEN_5853&DEV_0001"))
-  {
-    KdPrint((__DRIVER_NAME "     Xen PCI device found - must be fdo\n"));
+  if (XenPci_IdSuffixMatches(device_init, L"VEN_5853&DEV_0001")) {
+    FUNCTION_MSG("Xen PCI device found - must be fdo\n");
     return XenPci_EvtDeviceAdd_XenPci(driver, device_init);
-  }
-  else if (WdfCollectionGetCount(qemu_hide_devices) > 0)
-  {
-    KdPrint((__DRIVER_NAME "     Xen PCI device not found - must be filter\n"));
+  } else if (WdfCollectionGetCount(qemu_hide_devices) > 0) {
+    FUNCTION_MSG("Xen PCI device not found - must be filter\n");
     return XenPci_EvtDeviceAdd_XenHide(driver, device_init);  
-  }
-  else
+  } else {
     return STATUS_SUCCESS;
+  }
 }
 
 ULONG qemu_protocol_version;
@@ -860,10 +850,8 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
   conf_info = IoGetConfigurationInformation();      
   if (always_hide || ((conf_info == NULL || conf_info->DiskCount == 0)
       && !(system_start_options.Buffer && wcsstr(system_start_options.Buffer, L"NOGPLPV"))
-      && !*InitSafeBootMode))
-  {
-    if (!(system_start_options.Buffer && wcsstr(system_start_options.Buffer, L"GPLPVUSEFILTERHIDE")) && XenPci_CheckHideQemuDevices())
-    {
+      && !*InitSafeBootMode)) {
+    if (!(system_start_options.Buffer && wcsstr(system_start_options.Buffer, L"GPLPVUSEFILTERHIDE")) && XenPci_CheckHideQemuDevices()) {
       DECLARE_CONST_UNICODE_STRING(qemu_hide_flags_name, L"qemu_hide_flags");
       DECLARE_CONST_UNICODE_STRING(txt_qemu_hide_flags_name, L"txt_qemu_hide_flags");
       WDFCOLLECTION qemu_hide_flags;
@@ -872,8 +860,7 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
       WdfCollectionCreate(&parent_attributes, &qemu_hide_flags);
       WdfRegistryQueryMultiString(param_key, &qemu_hide_flags_name, &parent_attributes, qemu_hide_flags);
       WdfRegistryQueryMultiString(param_key, &txt_qemu_hide_flags_name, &parent_attributes, qemu_hide_flags);
-      for (i = 0; i < WdfCollectionGetCount(qemu_hide_flags); i++)
-      {
+      for (i = 0; i < WdfCollectionGetCount(qemu_hide_flags); i++) {
         ULONG value;
         WDFSTRING wdf_string = WdfCollectionGetItem(qemu_hide_flags, i);
         UNICODE_STRING unicode_string;
@@ -883,9 +870,7 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
       }
       WdfObjectDelete(qemu_hide_flags);
       XenPci_HideQemuDevices();
-    }
-    else
-    {
+    } else {
       WdfRegistryQueryMultiString(param_key, &hide_devices_name, &parent_attributes, qemu_hide_devices);      
     }
   }

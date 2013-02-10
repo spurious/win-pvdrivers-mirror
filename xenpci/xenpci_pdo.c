@@ -575,8 +575,6 @@ XenPci_EvtChildListCreateDevice(WDFCHILDLIST child_list,
   xppdd->wdf_device_bus_fdo = WdfChildListGetDevice(child_list);
   xppdd->xpdd = xpdd;
 
-  xppdd->config_page_mdl = AllocateUncachedPage();
-
   WdfDeviceSetSpecialFileSupport(child_device, WdfSpecialFilePaging, TRUE);
   WdfDeviceSetSpecialFileSupport(child_device, WdfSpecialFileHibernation, TRUE);
   WdfDeviceSetSpecialFileSupport(child_device, WdfSpecialFileDump, TRUE);

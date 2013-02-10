@@ -25,11 +25,6 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 #include <ntddk.h>
 
-/* including ntifs.h (only needed for this function) causes PREFast to trip up on lots of bogus errors */
-PDEVICE_OBJECT IoGetLowerDeviceObject(IN PDEVICE_OBJECT DeviceObject); 
-//#include <ntifs.h>
-
-//#include <wdm.h>
 #include <wdf.h>
 #include <initguid.h>
 #include <wdmguid.h>
@@ -262,14 +257,6 @@ typedef struct {
   PVOID device_callback_context;
   FAST_MUTEX backend_state_mutex;
   ULONG frontend_state;
-  PMDL config_page_mdl;
-  PHYSICAL_ADDRESS config_page_phys;
-  ULONG config_page_length;
-  PUCHAR requested_resources_start;
-  PUCHAR requested_resources_ptr;
-  PUCHAR assigned_resources_start;
-  PUCHAR assigned_resources_ptr;
-  //XENPCI_DEVICE_STATE device_state;
   BOOLEAN restart_on_resume;
   BOOLEAN backend_initiated_remove;
   BOOLEAN do_not_enumerate;
@@ -377,9 +364,6 @@ VOID XenPci_HideQemuDevices();
 extern WDFCOLLECTION qemu_hide_devices;
 extern USHORT qemu_hide_flags_value;
 
-//NTSTATUS XenPci_Pdo_Suspend(WDFDEVICE device);
-//NTSTATUS XenPci_Pdo_Resume(WDFDEVICE device);
-
 VOID XenPci_BackendStateCallback(char *path, PVOID context);
 NTSTATUS XenPci_SuspendPdo(WDFDEVICE device);
 NTSTATUS XenPci_ResumePdo(WDFDEVICE device);
@@ -426,12 +410,10 @@ NTSTATUS EvtChn_Mask(PVOID context, evtchn_port_t port);
 NTSTATUS EvtChn_Unmask(PVOID context, evtchn_port_t port);
 NTSTATUS EvtChn_Bind(PVOID context, evtchn_port_t port, PXN_EVENT_CALLBACK ServiceRoutine, PVOID ServiceContext, ULONG flags);
 NTSTATUS EvtChn_BindDpc(PVOID context, evtchn_port_t port, PXN_EVENT_CALLBACK ServiceRoutine, PVOID ServiceContext, ULONG flags);
-//ULONG EvtChn_AllocIpi(PVOID context, ULONG vcpu);
 NTSTATUS EvtChn_Unbind(PVOID context, evtchn_port_t port);
 NTSTATUS EvtChn_Notify(PVOID context, evtchn_port_t port);
 VOID EvtChn_Close(PVOID context, evtchn_port_t port);
 evtchn_port_t EvtChn_AllocUnbound(PVOID context, domid_t domain);
-//BOOLEAN EvtChn_AckEvent(PVOID context, evtchn_port_t port, BOOLEAN *last_interrupt);
 evtchn_port_t EvtChn_GetEventPort(PVOID context, evtchn_port_t port);
 
 VOID GntTbl_Init(PXENPCI_DEVICE_DATA xpdd);

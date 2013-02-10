@@ -199,7 +199,7 @@ XnWriteString(XN_HANDLE handle, ULONG base, PCHAR path, PCHAR value) {
   RtlStringCbCatA(full_path, ARRAY_SIZE(full_path), "/");
   RtlStringCbCatA(full_path, ARRAY_SIZE(full_path), path);
 
-  FUNCTION_MSG("XnWriteString(%s, %s)\n", full_path, value);
+  //FUNCTION_MSG("XnWriteString(%s, %s)\n", full_path, value);
   response = XenBus_Write(xpdd, XBT_NIL, full_path, value);
   if (response) {
     FUNCTION_MSG("XnWriteString - %s = %s\n", full_path, response);
@@ -262,7 +262,7 @@ XnWriteInt32(XN_HANDLE handle, ULONG base, PCHAR path, ULONG value) {
   RtlStringCbCatA(full_path, ARRAY_SIZE(full_path), "/");
   RtlStringCbCatA(full_path, ARRAY_SIZE(full_path), path);
   
-  FUNCTION_MSG("XnWriteInt32(%s, %d)\n", full_path, value);
+  //FUNCTION_MSG("XnWriteInt32(%s, %d)\n", full_path, value);
   response = XenBus_Printf(xpdd, XBT_NIL, full_path, "%d", value);
   if (response) {
     FUNCTION_MSG("XnWriteInt - %s = %s\n", full_path, response);
