@@ -24,7 +24,13 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <ntddk.h>
 #include <wdm.h>
 #define NDIS_MINIPORT_DRIVER 1
-#define NDIS61_MINIPORT 1
+#if NTDDI_VERSION < NTDDI_WINXP
+# define NDIS50_MINIPORT 1
+#elif NTDDI_VERSION < NTDDI_VISTA
+# define NDIS51_MINIPORT 1
+#else
+# define NDIS61_MINIPORT 1
+#endif
 #include <ndis.h>
 #define NTSTRSAFE_LIB
 #include <ntstrsafe.h>
@@ -33,11 +39,18 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #define VENDOR_DRIVER_VERSION_MAJOR 0
 #define VENDOR_DRIVER_VERSION_MINOR 11
 
-#define MAX_LINK_SPEED 10000000000L; /* there is not really any theoretical maximum... */
+#define MAX_LINK_SPEED 10000000000L /* there is not really any theoretical maximum... */
 
 #define VENDOR_DRIVER_VERSION (((VENDOR_DRIVER_VERSION_MAJOR) << 16) | (VENDOR_DRIVER_VERSION_MINOR))
 
 #define __DRIVER_NAME "XenNet"
+
+#define PACKET_NEXT_PACKET_FIELD MiniportReservedEx[sizeof(PVOID)] // RX & TX
+#define PACKET_FIRST_PB_FIELD MiniportReservedEx[0] // RX
+#define PACKET_LIST_ENTRY_FIELD MiniportReservedEx[sizeof(PVOID)] // TX (2 entries)
+#define PACKET_NEXT_PACKET(_packet) (*(PNDIS_PACKET *)&(_packet)->PACKET_NEXT_PACKET_FIELD)
+#define PACKET_LIST_ENTRY(_packet) (*(PLIST_ENTRY)&(_packet)->PACKET_LIST_ENTRY_FIELD)
+#define PACKET_FIRST_PB(_packet) (*(shared_buffer_t **)&(_packet)->PACKET_FIRST_PB_FIELD)
 
 #define NB_LIST_ENTRY_FIELD MiniportReserved[0] // TX (2 entries)
 #define NB_FIRST_PB_FIELD MiniportReserved[0] // RX
@@ -47,13 +60,9 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #define NB_FIRST_PB(_nb) (*(shared_buffer_t **)&(_nb)->NB_FIRST_PB_FIELD)
 
 #define NBL_REF_FIELD MiniportReserved[0] // TX
-//#define NBL_LIST_ENTRY_FIELD MiniportReserved[0] // TX (2 entries) - overlaps with REF_FIELD
-//#define NBL_PACKET_COUNT_FIELD MiniportReserved[0] // RX
-//#define NBL_LAST_NB_FIELD MiniportReserved[1] // RX
 #define NBL_REF(_nbl) (*(ULONG_PTR *)&(_nbl)->NBL_REF_FIELD)
-//#define NBL_LIST_ENTRY(_nbl) (*(PLIST_ENTRY)&(_nbl)->NBL_LIST_ENTRY_FIELD)
-//#define NBL_PACKET_COUNT(_nbl) (*(ULONG_PTR *)&(_nbl)->NBL_PACKET_COUNT_FIELD)
-//#define NBL_LAST_NB(_nbl) (*(PNET_BUFFER *)&(_nbl)->NBL_LAST_NB_FIELD)
+
+#define NDIS_STATUS_RESOURCES_MAX_LENGTH 64
 
 #include <xen_windows.h>
 #include <memory.h>
@@ -78,35 +87,23 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 #define ETH_ALEN 6
 
-/*
-#define __NET_USHORT_BYTE_0(x) ((USHORT)(x & 0xFF))
-#define __NET_USHORT_BYTE_1(x) ((USHORT)((PUCHAR)&x)[1] & 0xFF)
-
-#define GET_NET_USHORT(x) ((__NET_USHORT_BYTE_0(x) << 8) | __NET_USHORT_BYTE_1(x))
-#define SET_NET_USHORT(y, x) *((USHORT *)&(y)) = ((__NET_USHORT_BYTE_0(x) << 8) | __NET_USHORT_BYTE_1(x))
-*/
-
 static FORCEINLINE USHORT
-GET_NET_USHORT(USHORT data)
-{
+GET_NET_USHORT(USHORT data) {
   return (data << 8) | (data >> 8);
 }
 
 static FORCEINLINE USHORT
-GET_NET_PUSHORT(PVOID pdata)
-{
+GET_NET_PUSHORT(PVOID pdata) {
   return (*((PUSHORT)pdata) << 8) | (*((PUSHORT)pdata) >> 8);
 }
 
 static FORCEINLINE VOID
-SET_NET_USHORT(PVOID ptr, USHORT data)
-{
+SET_NET_USHORT(PVOID ptr, USHORT data) {
   *((PUSHORT)ptr) = GET_NET_USHORT(data);
 }
 
 static FORCEINLINE ULONG
-GET_NET_ULONG(ULONG data)
-{
+GET_NET_ULONG(ULONG data) {
   ULONG tmp;
   
   tmp = ((data & 0x00ff00ff) << 8) | ((data & 0xff00ff00) >> 8);
@@ -114,8 +111,7 @@ GET_NET_ULONG(ULONG data)
 }
 
 static FORCEINLINE ULONG
-GET_NET_PULONG(PVOID pdata)
-{
+GET_NET_PULONG(PVOID pdata) {
   ULONG tmp;
   
   tmp = ((*((PULONG)pdata) & 0x00ff00ff) << 8) | ((*((PULONG)pdata) & 0xff00ff00) >> 8);
@@ -123,8 +119,7 @@ GET_NET_PULONG(PVOID pdata)
 }
 
 static FORCEINLINE VOID
-SET_NET_ULONG(PVOID ptr, ULONG data)
-{
+SET_NET_ULONG(PVOID ptr, ULONG data) {
   *((PULONG)ptr) = GET_NET_ULONG(data);
 }
 /*
@@ -191,12 +186,30 @@ SET_NET_ULONG(PVOID ptr, ULONG data)
 
 #define LINUX_MAX_SG_ELEMENTS 19
 
+#define PAGE_LIST_SIZE (max(NET_RX_RING_SIZE, NET_TX_RING_SIZE) * 4)
+#define MULTICAST_LIST_MAX_SIZE 32
+
+#define TX_HEADER_BUFFER_SIZE 512
+#define TX_COALESCE_BUFFERS (NET_TX_RING_SIZE)
+
+/* split incoming large packets into MSS sized chunks */
+#define RX_LSO_SPLIT_MSS 0
+/* split incoming large packets in half, to not invoke the delayed ack timer */
+#define RX_LSO_SPLIT_HALF 1
+/* don't split incoming large packets. not really useful */
+#define RX_LSO_SPLIT_NONE 2
+
+#define DEVICE_STATE_DISCONNECTED  0 /* -> INITIALISING */
+#define DEVICE_STATE_INITIALISING  1 /* -> ACTIVE or INACTIVE */
+#define DEVICE_STATE_INACTIVE      2
+#define DEVICE_STATE_ACTIVE        3 /* -> DISCONNECTING */
+#define DEVICE_STATE_DISCONNECTING 4 /* -> DISCONNECTED */
+
 struct _shared_buffer_t;
 
 typedef struct _shared_buffer_t shared_buffer_t;
 
-struct _shared_buffer_t
-{
+struct _shared_buffer_t {
   struct netif_rx_response rsp;
   shared_buffer_t *next;
   grant_ref_t gref;
@@ -207,9 +220,9 @@ struct _shared_buffer_t
   volatile LONG ref_count;
 };
 
-typedef struct
-{
-  PNET_BUFFER nb; /* only set on the last packet */
+typedef struct {
+  //PNET_BUFFER packet; /* only set on the last packet */
+  PNDIS_PACKET packet;
   PVOID *cb;
   grant_ref_t gref;
 } tx_shadow_t;
@@ -236,6 +249,7 @@ typedef struct {
   PUCHAR header;
   ULONG header_length;
   UCHAR ip_proto;
+  BOOLEAN ip_has_options;
   ULONG total_length;
   USHORT ip4_header_length;
   USHORT ip4_length;
@@ -250,22 +264,6 @@ typedef struct {
   UCHAR header_data[MAX_LOOKAHEAD_LENGTH + MAX_ETH_HEADER_LENGTH];
 } packet_info_t;
 
-#define PAGE_LIST_SIZE (max(NET_RX_RING_SIZE, NET_TX_RING_SIZE) * 4)
-#define MULTICAST_LIST_MAX_SIZE 32
-
-/* split incoming large packets into MSS sized chunks */
-#define RX_LSO_SPLIT_MSS 0
-/* split incoming large packets in half, to not invoke the delayed ack timer */
-#define RX_LSO_SPLIT_HALF 1
-/* don't split incoming large packets. not really useful */
-#define RX_LSO_SPLIT_NONE 2
-
-#define DEVICE_STATE_DISCONNECTED  0 /* -> INITIALISING */
-#define DEVICE_STATE_INITIALISING  1 /* -> ACTIVE or INACTIVE */
-#define DEVICE_STATE_INACTIVE      2
-#define DEVICE_STATE_ACTIVE        3 /* -> DISCONNECTING */
-#define DEVICE_STATE_DISCONNECTING 4 /* -> DISCONNECTED */
-
 struct xennet_info
 {
   ULONG device_state;
@@ -274,36 +272,23 @@ struct xennet_info
   PDEVICE_OBJECT pdo;
   PDEVICE_OBJECT fdo;
   PDEVICE_OBJECT lower_do;
-  //WDFDEVICE wdf_device;
-  WCHAR dev_desc[NAME_SIZE];
+//  WCHAR dev_desc[NAME_SIZE];
 
   /* NDIS-related vars */
   NDIS_HANDLE adapter_handle;
   ULONG packet_filter;
-  //BOOLEAN connected;
   uint8_t perm_mac_addr[ETH_ALEN];
   uint8_t curr_mac_addr[ETH_ALEN];
   ULONG current_lookahead;
-  //NDIS_DEVICE_POWER_STATE new_power_state;
-  //NDIS_DEVICE_POWER_STATE power_state;
-  //PIO_WORKITEM power_workitem;
 
   /* Misc. Xen vars */
   XN_HANDLE handle;
-  //XENPCI_VECTORS vectors;
   
-  //PXENPCI_DEVICE_STATE device_state;
   evtchn_port_t event_channel;
-  //ULONG state;
-  //char backend_path[MAX_XENBUS_STR_LEN];
   ULONG backend_state;
   KEVENT backend_event;
-  //PVOID config_page;
   UCHAR multicast_list[MULTICAST_LIST_MAX_SIZE][6];
   ULONG multicast_list_size;
-  //KDPC suspend_dpc;
-  //PIO_WORKITEM resume_work_item;
-  //KSPIN_LOCK resume_lock;
   KDPC rxtx_dpc;
 
   /* tx related - protected by tx_lock */
@@ -314,8 +299,6 @@ struct xennet_info
   struct netif_tx_front_ring tx_ring;
   ULONG tx_ring_free;
   tx_shadow_t tx_shadows[NET_TX_RING_SIZE];
-#define TX_HEADER_BUFFER_SIZE 512
-#define TX_COALESCE_BUFFERS (NET_TX_RING_SIZE)
   ULONG tx_outstanding;
   ULONG tx_id_free;
   USHORT tx_id_list[NET_TX_RING_SIZE];
@@ -329,9 +312,11 @@ struct xennet_info
   struct netif_rx_front_ring rx_ring;
   ULONG rx_id_free;
   packet_info_t *rxpi;
-  KEVENT packet_returned_event;
+  #if NTDDI_VERSION < NTDDI_VISTA
+  #else
   NDIS_HANDLE rx_nbl_pool;
-  NDIS_HANDLE rx_nb_pool;
+  #endif
+  NDIS_HANDLE rx_packet_pool;
   volatile LONG rx_pb_free;
   struct stack_state *rx_pb_stack;
   volatile LONG rx_hb_free;
@@ -367,32 +352,78 @@ struct xennet_info
   ULONG current_mtu_value;
   ULONG current_gso_rx_split_type;
 
+  BOOLEAN config_csum_rx_check;
+  BOOLEAN config_csum_rx_dont_fix;
+
+  #if NTDDI_VERSION < NTDDI_VISTA
+  NDIS_TASK_TCP_IP_CHECKSUM setting_csum;
+  #else
+  #endif
+
   /* config stuff calculated from the above */
   ULONG config_max_pkt_size;
 
-  /* stats */\
+  /* stats */
+  #if NTDDI_VERSION < NTDDI_VISTA
+  ULONG64 stat_tx_ok;
+  ULONG64 stat_rx_ok;
+  ULONG64 stat_tx_error;
+  ULONG64 stat_rx_error;
+  ULONG64 stat_rx_no_buffer;
+  #else
   NDIS_STATISTICS_INFO stats;
-  //ULONG64 stat_tx_ok;
-  //ULONG64 stat_rx_ok;
-  //ULONG64 stat_tx_error;
-  //ULONG64 stat_rx_error;
-  //ULONG64 stat_rx_no_buffer;
+  #endif
   
 } typedef xennet_info_t;
+
+extern USHORT ndis_os_major_version;
+extern USHORT ndis_os_minor_version;
+
+typedef NDIS_STATUS (*XEN_OID_REQUEST)(NDIS_HANDLE context, PVOID information_buffer, ULONG information_buffer_length, PULONG bytes_read, PULONG bytes_needed);
 
 struct xennet_oids_t {
   ULONG oid;
   char *oid_name;
   ULONG min_length;
-  MINIPORT_OID_REQUEST *query_routine;
-  MINIPORT_OID_REQUEST *set_routine;
+  XEN_OID_REQUEST query_routine;
+  XEN_OID_REQUEST set_routine;
 };
 
 extern struct xennet_oids_t xennet_oids[];
 
-extern USHORT ndis_os_major_version;
-extern USHORT ndis_os_minor_version;
+#if NTDDI_VERSION < NTDDI_VISTA
+NDIS_STATUS
+XenNet_QueryInformation(
+  IN NDIS_HANDLE MiniportAdapterContext,
+  IN NDIS_OID Oid,
+  IN PVOID InformationBuffer,
+  IN ULONG InformationBufferLength,
+  OUT PULONG BytesWritten,
+  OUT PULONG BytesNeeded);
 
+NDIS_STATUS
+XenNet_SetInformation(
+  IN NDIS_HANDLE MiniportAdapterContext,
+  IN NDIS_OID Oid,
+  IN PVOID InformationBuffer,
+  IN ULONG InformationBufferLength,
+  OUT PULONG BytesRead,
+  OUT PULONG BytesNeeded
+  );
+
+VOID
+XenNet_SendPackets(
+  IN NDIS_HANDLE MiniportAdapterContext,
+  IN PPNDIS_PACKET PacketArray,
+  IN UINT NumberOfPackets
+  );
+
+VOID
+XenNet_ReturnPacket(
+  IN NDIS_HANDLE MiniportAdapterContext,
+  IN PNDIS_PACKET Packet
+  );
+#else
 
 MINIPORT_OID_REQUEST XenNet_OidRequest;
 MINIPORT_CANCEL_OID_REQUEST XenNet_CancelOidRequest;
@@ -401,6 +432,12 @@ MINIPORT_SEND_NET_BUFFER_LISTS XenNet_SendNetBufferLists;
 MINIPORT_CANCEL_SEND XenNet_CancelSend;
 
 MINIPORT_RETURN_NET_BUFFER_LISTS XenNet_ReturnNetBufferLists;
+#endif
+
+NTSTATUS XenNet_Connect(PVOID context, BOOLEAN suspend);
+NTSTATUS XenNet_Disconnect(PVOID context, BOOLEAN suspend);
+VOID XenNet_DeviceCallback(PVOID context, ULONG callback_type, PVOID value);
+
 
 BOOLEAN XenNet_RxInit(xennet_info_t *xi);
 VOID XenNet_RxShutdown(xennet_info_t *xi);
@@ -410,43 +447,27 @@ BOOLEAN XenNet_TxInit(xennet_info_t *xi);
 BOOLEAN XenNet_TxShutdown(xennet_info_t *xi);
 VOID XenNet_TxBufferGC(struct xennet_info *xi, BOOLEAN dont_set_event);
 
-#if 0
-NDIS_STATUS
-XenNet_D0Entry(struct xennet_info *xi);
-NDIS_STATUS
-XenNet_D0Exit(struct xennet_info *xi);
-IO_WORKITEM_ROUTINE
-XenNet_SetPower;
-#endif
 
 /* return values */
 #define PARSE_OK 0
 #define PARSE_TOO_SMALL 1 /* first buffer is too small */
 #define PARSE_UNKNOWN_TYPE 2
 
-BOOLEAN
-XenNet_BuildHeader(packet_info_t *pi, PVOID header, ULONG new_header_size);
-VOID
-XenNet_ParsePacketHeader(packet_info_t *pi, PUCHAR buffer, ULONG min_header_size);
-BOOLEAN
-XenNet_FilterAcceptPacket(struct xennet_info *xi,packet_info_t *pi);
+BOOLEAN XenNet_BuildHeader(packet_info_t *pi, PVOID header, ULONG new_header_size);
+VOID XenNet_ParsePacketHeader(packet_info_t *pi, PUCHAR buffer, ULONG min_header_size);
+BOOLEAN XenNet_FilterAcceptPacket(struct xennet_info *xi, packet_info_t *pi);
 
-VOID
-XenNet_SumIpHeader(
-  PUCHAR header,
-  USHORT ip4_header_length
-);
+BOOLEAN XenNet_CheckIpHeaderSum(PUCHAR header, USHORT ip4_header_length);
+VOID XenNet_SumIpHeader(PUCHAR header, USHORT ip4_header_length);
 
 static __forceinline VOID
-XenNet_ClearPacketInfo(packet_info_t *pi)
-{
+XenNet_ClearPacketInfo(packet_info_t *pi) {
   RtlZeroMemory(pi, sizeof(packet_info_t) - FIELD_OFFSET(packet_info_t, header_data));
 }
 
 /* Get some data from the current packet, but don't cross a page boundry. */
 static __forceinline ULONG
-XenNet_QueryData(packet_info_t *pi, ULONG length)
-{
+XenNet_QueryData(packet_info_t *pi, ULONG length) {
   ULONG offset_in_page;
   
   if (length > MmGetMdlByteCount(pi->curr_mdl) - pi->curr_mdl_offset)
@@ -461,12 +482,14 @@ XenNet_QueryData(packet_info_t *pi, ULONG length)
 
 /* Move the pointers forward by the given amount. No error checking is done.  */
 static __forceinline VOID
-XenNet_EatData(packet_info_t *pi, ULONG length)
-{
+XenNet_EatData(packet_info_t *pi, ULONG length) {
   pi->curr_mdl_offset += length;
-  if (pi->curr_mdl_offset >= MmGetMdlByteCount(pi->curr_mdl))
-  {
+  if (pi->curr_mdl_offset >= MmGetMdlByteCount(pi->curr_mdl)) {
     pi->curr_mdl_offset -= MmGetMdlByteCount(pi->curr_mdl);
+#if NTDDI_VERSION < NTDDI_VISTA
+    NdisGetNextBuffer(pi->curr_mdl, &pi->curr_mdl);
+#else
     NdisGetNextMdl(pi->curr_mdl, &pi->curr_mdl);
+#endif
   }
 }
