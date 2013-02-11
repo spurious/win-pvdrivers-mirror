@@ -23,7 +23,7 @@
     
     <Media Id='1' Cabinet='gplpv.cab' EmbedCab='yes' />
 
-    <?if $(env.DDK_TARGET_OS) != Win2K?>
+    <?if $(env.DDK_TARGET_OS) != Win2K ?>
     <Binary Id='waitfordevices.vbs' SourceFile='waitnopendinginstallevents\waitfordevices.vbs'/>
     <Binary Id='waitnopendinginstallevents.exe' SourceFile='waitnopendinginstallevents\obj$(env.BUILD_ALT_DIR)\$(var.ARCHDIR)\waitnopendinginstallevents.exe'/>
     <?endif?>
@@ -79,14 +79,26 @@
                 <difx:Driver Sequence='99' Legacy='yes' PlugAndPlayPrompt='no' ForceInstall='yes' />
               </Component>
             </Directory>
+            <?if $(env.DDK_TARGET_OS) = Win2K OR $(env.DDK_TARGET_OS) = WinXP OR $(env.DDK_TARGET_OS) = WinNet ?>
             <Directory Id='XenVbdDir' Name='xenvbd'>
               <Component Id='XenVbd' Guid='1F05DC54-974C-40f6-BF41-0EFDB3EBD1DC'>
-                <File Id='xenvbd.cat' Name='xenvbd.cat' DiskId='1' Source='xenvbd\obj$(env.BUILD_ALT_DIR)\$(var.ARCHDIR)\xenvbd.cat' />
-                <File Id='xenvbd.inf' Name='xenvbd.inf' DiskId='1' Source='xenvbd\obj$(env.BUILD_ALT_DIR)\$(var.ARCHDIR)\xenvbd.inf' />
-                <File Id='xenvbd.sys' Name='xenvbd.sys' DiskId='1' Source='xenvbd\obj$(env.BUILD_ALT_DIR)\$(var.ARCHDIR)\xenvbd.sys' />
+                <File Id='xenvbd.cat' Name='xenvbd.cat' DiskId='1' Source='xenvbd_scsiport\obj$(env.BUILD_ALT_DIR)\$(var.ARCHDIR)\xenvbd.cat' />
+                <File Id='xenvbd.inf' Name='xenvbd.inf' DiskId='1' Source='xenvbd_scsiport\obj$(env.BUILD_ALT_DIR)\$(var.ARCHDIR)\xenvbd.inf' />
+                <File Id='xenvbd.sys' Name='xenvbd.sys' DiskId='1' Source='xenvbd_scsiport\obj$(env.BUILD_ALT_DIR)\$(var.ARCHDIR)\xenvbd.sys' />
+                <File Id='xenvbdfilter.sys' Name='xenvbdfilter.sys' DiskId='1' Source='xenvbd_scsiport\obj$(env.BUILD_ALT_DIR)\$(var.ARCHDIR)\xenvbdfilter.sys' />
                 <difx:Driver Sequence='1' Legacy='yes' PlugAndPlayPrompt='no' ForceInstall='yes'/>
               </Component>
             </Directory>
+            <?else ?>
+            <Directory Id='XenVbdDir' Name='xenvbd'>
+              <Component Id='XenVbd' Guid='1F05DC54-974C-40f6-BF41-0EFDB3EBD1DC'>
+                <File Id='xenvbd.cat' Name='xenvbd.cat' DiskId='1' Source='xenvbd_storport\obj$(env.BUILD_ALT_DIR)\$(var.ARCHDIR)\xenvbd.cat' />
+                <File Id='xenvbd.inf' Name='xenvbd.inf' DiskId='1' Source='xenvbd_storport\obj$(env.BUILD_ALT_DIR)\$(var.ARCHDIR)\xenvbd.inf' />
+                <File Id='xenvbd.sys' Name='xenvbd.sys' DiskId='1' Source='xenvbd_storport\obj$(env.BUILD_ALT_DIR)\$(var.ARCHDIR)\xenvbd.sys' />
+                <difx:Driver Sequence='1' Legacy='yes' PlugAndPlayPrompt='no' ForceInstall='yes'/>
+              </Component>
+            </Directory>
+            <?endif ?>
             <?if $(env.DDK_TARGET_OS) != Win2K ?>
             <Directory Id='XenScsiDir' Name='xenscsi'>
               <Component Id='XenScsi' Guid='47C9AB48-3A7D-42b2-AE2C-7F9235C8B7B4'>
