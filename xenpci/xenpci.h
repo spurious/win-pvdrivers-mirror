@@ -204,7 +204,7 @@ typedef struct {
   
   WDFCHILDLIST child_list;
   
-  KGUARDED_MUTEX suspend_mutex;
+  FAST_MUTEX suspend_mutex;
   
   ULONG suspend_evtchn;
   int suspend_state;

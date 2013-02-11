@@ -148,7 +148,7 @@ XenPci_EvtDeviceAdd_XenPci(WDFDRIVER driver, PWDFDEVICE_INIT device_init)
   xpdd->wdf_device = device;
   xpdd->child_list = WdfFdoGetDefaultChildList(device);
 
-  KeInitializeGuardedMutex(&xpdd->suspend_mutex);
+  ExInitializeFastMutex(&xpdd->suspend_mutex);
   WdfCollectionCreate(WDF_NO_OBJECT_ATTRIBUTES, &veto_devices);
   status = WdfDriverOpenParametersRegistryKey(driver, KEY_QUERY_VALUE, WDF_NO_OBJECT_ATTRIBUTES, &param_key);
   if (NT_SUCCESS(status))

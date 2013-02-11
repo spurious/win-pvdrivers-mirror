@@ -540,7 +540,7 @@ XenPci_SuspendResume(WDFWORKITEM workitem) {
   FUNCTION_ENTER();
 
   if (xpdd->suspend_state == SUSPEND_STATE_NONE) {
-    KeAcquireGuardedMutex(&xpdd->suspend_mutex);
+    ExAcquireFastMutex(&xpdd->suspend_mutex);
     xpdd->suspend_state = SUSPEND_STATE_SCHEDULED;
     KeMemoryBarrier();
     
@@ -569,7 +569,7 @@ XenPci_SuspendResume(WDFWORKITEM workitem) {
     WdfChildListEndIteration(child_list, &child_iterator);
 
     xpdd->suspend_state = SUSPEND_STATE_NONE;
-    KeReleaseGuardedMutex(&xpdd->suspend_mutex);
+    ExReleaseFastMutex(&xpdd->suspend_mutex);
   }
   FUNCTION_EXIT();
 }
