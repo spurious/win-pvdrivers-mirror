@@ -521,13 +521,15 @@ NDIS_STATUS
 XenNet_QueryOID_GEN_INTERRUPT_MODERATION(NDIS_HANDLE context, PVOID information_buffer, ULONG information_buffer_length, PULONG bytes_written, PULONG bytes_needed) {
   PNDIS_INTERRUPT_MODERATION_PARAMETERS nimp;
   UNREFERENCED_PARAMETER(context);
+  UNREFERENCED_PARAMETER(bytes_needed);
+  UNREFERENCED_PARAMETER(information_buffer_length);
   nimp = (PNDIS_INTERRUPT_MODERATION_PARAMETERS)information_buffer;
   nimp->Header.Type = NDIS_OBJECT_TYPE_DEFAULT;
   nimp->Header.Revision = NDIS_INTERRUPT_MODERATION_PARAMETERS_REVISION_1;
   nimp->Header.Size = NDIS_SIZEOF_INTERRUPT_MODERATION_PARAMETERS_REVISION_1;
   nimp->Flags = 0;
   nimp->InterruptModeration = NdisInterruptModerationNotSupported;
-  *bytes_read = sizeof(NDIS_INTERRUPT_MODERATION_PARAMETERS);
+  *bytes_written = sizeof(NDIS_INTERRUPT_MODERATION_PARAMETERS);
   return STATUS_SUCCESS;
 }
 
@@ -544,17 +546,21 @@ XenNet_SetOID_GEN_INTERRUPT_MODERATION(NDIS_HANDLE context, PVOID information_bu
 NDIS_STATUS
 XenNet_QueryOID_GEN_STATISTICS(NDIS_HANDLE context, PVOID information_buffer, ULONG information_buffer_length, PULONG bytes_written, PULONG bytes_needed) {
   struct xennet_info *xi = context;
+  UNREFERENCED_PARAMETER(bytes_needed);
+  UNREFERENCED_PARAMETER(information_buffer_length);
 
   NdisMoveMemory(information_buffer, &xi->stats, sizeof(NDIS_STATISTICS_INFO));
-  *bytes_read = sizeof(NDIS_STATISTICS_INFO);
+  *bytes_written = sizeof(NDIS_STATISTICS_INFO);
   return STATUS_SUCCESS;
 }
 
 NDIS_STATUS
 XenNet_SetOID_OFFLOAD_ENCAPSULATION(NDIS_HANDLE context, PVOID information_buffer, ULONG information_buffer_length, PULONG bytes_read, PULONG bytes_needed) {
   struct xennet_info *xi = context;
-  /* mostly assume that NDIS vets the settings for us */
   PNDIS_OFFLOAD_ENCAPSULATION noe = (PNDIS_OFFLOAD_ENCAPSULATION)information_buffer;
+  UNREFERENCED_PARAMETER(bytes_needed);
+  UNREFERENCED_PARAMETER(information_buffer_length);
+  /* mostly assume that NDIS vets the settings for us */
   if (noe->IPv4.EncapsulationType != NDIS_ENCAPSULATION_IEEE_802_3) {
     FUNCTION_MSG("Unknown Encapsulation Type %d\n", noe->IPv4.EncapsulationType);
     return NDIS_STATUS_NOT_SUPPORTED;
@@ -588,6 +594,7 @@ XenNet_SetOID_OFFLOAD_ENCAPSULATION(NDIS_HANDLE context, PVOID information_buffe
     FUNCTION_MSG(" IPv6.Enabled = NDIS_OFFLOAD_NO_CHANGE\n");
     break;
   }
+  *bytes_read = sizeof(NDIS_OFFLOAD_ENCAPSULATION);
   FUNCTION_MSG(" IPv6.HeaderSize = %d\n", noe->IPv6.HeaderSize);
   return NDIS_STATUS_SUCCESS;
 }
@@ -800,7 +807,6 @@ XenNet_OidRequest(NDIS_HANDLE adapter_context, PNDIS_OID_REQUEST oid_request)
   NTSTATUS status;
   int i;
   NDIS_OID oid;
-  MINIPORT_OID_REQUEST *routine;
   
   //FUNCTION_ENTER();
   switch(oid_request->RequestType)
@@ -828,7 +834,6 @@ XenNet_OidRequest(NDIS_HANDLE adapter_context, PNDIS_OID_REQUEST oid_request)
     return NDIS_STATUS_NOT_SUPPORTED;
   }
   //FUNCTION_MSG("Oid = %s\n", xennet_oids[i].oid_name);
-  routine = NULL;
   switch(oid_request->RequestType)
   {
   case NdisRequestQueryInformation:
@@ -838,12 +843,11 @@ XenNet_OidRequest(NDIS_HANDLE adapter_context, PNDIS_OID_REQUEST oid_request)
       oid_request->DATA.QUERY_INFORMATION.BytesNeeded = xennet_oids[i].min_length;
       return NDIS_STATUS_BUFFER_TOO_SHORT;
     }
-    routine =  xennet_oids[i].query_routine;
-    if (!routine) {
+    if (!xennet_oids[i].query_routine) {
       //FUNCTION_MSG("Operation not supported\n");
       return NDIS_STATUS_NOT_SUPPORTED;
     }
-    status = routine(adapter_context, oid_request->DATA.QUERY_INFORMATION.InformationBuffer, oid_request->DATA.QUERY_INFORMATION.InformationBufferLength, &oid_request->DATA.QUERY_INFORMATION.BytesWritten, &oid_request->DATA.QUERY_INFORMATION.BytesNeeded);
+    status = xennet_oids[i].query_routine(adapter_context, oid_request->DATA.QUERY_INFORMATION.InformationBuffer, oid_request->DATA.QUERY_INFORMATION.InformationBufferLength, (PULONG)&oid_request->DATA.QUERY_INFORMATION.BytesWritten, (PULONG)&oid_request->DATA.QUERY_INFORMATION.BytesNeeded);
     break;
   case NdisRequestSetInformation:
     if (oid_request->DATA.SET_INFORMATION.InformationBufferLength < xennet_oids[i].min_length) {
@@ -851,22 +855,15 @@ XenNet_OidRequest(NDIS_HANDLE adapter_context, PNDIS_OID_REQUEST oid_request)
       oid_request->DATA.SET_INFORMATION.BytesNeeded = xennet_oids[i].min_length;
       return NDIS_STATUS_BUFFER_TOO_SHORT;
     }
-    routine =  xennet_oids[i].set_routine;
-    if (!routine) {
+    if (!xennet_oids[i].set_routine) {
       //FUNCTION_MSG("Operation not supported\n");
       return NDIS_STATUS_NOT_SUPPORTED;
     }
-    XenNet_Query##oid(NDIS_HANDLE context, PVOID information_buffer, ULONG information_buffer_length, PULONG bytes_written, PULONG bytes_needed) { \
-
+    status = xennet_oids[i].set_routine(adapter_context, oid_request->DATA.SET_INFORMATION.InformationBuffer, oid_request->DATA.SET_INFORMATION.InformationBufferLength, (PULONG)&oid_request->DATA.SET_INFORMATION.BytesRead, (PULONG)&oid_request->DATA.SET_INFORMATION.BytesNeeded);
     break;
-  }
-  if (!routine) {
-    //FUNCTION_MSG("Operation not supported\n");
+  default:
     return NDIS_STATUS_NOT_SUPPORTED;
   }
-  status = routine(adapter_context, oid_request);
-  //FUNCTION_MSG("status = %08x\n", status);
-  
   //FUNCTION_EXIT();
   return status;
 }

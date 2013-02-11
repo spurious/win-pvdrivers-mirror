@@ -740,7 +740,7 @@ DriverEntry(PDRIVER_OBJECT driver_object, PUNICODE_STRING registry_path)
   }
 
   mini_chars.SendNetBufferListsHandler = XenNet_SendNetBufferLists;
-  //mini_chars.CancelSendHandler = XenNet_CancelSend;
+  mini_chars.CancelSendHandler = XenNet_CancelSend;
 
   mini_chars.ReturnNetBufferListsHandler = XenNet_ReturnNetBufferLists;
 

@@ -221,8 +221,11 @@ struct _shared_buffer_t {
 };
 
 typedef struct {
-  //PNET_BUFFER packet; /* only set on the last packet */
-  PNDIS_PACKET packet;
+  #if NTDDI_VERSION < NTDDI_VISTA
+  PNDIS_PACKET packet; /* only set on the last packet */
+  #else
+  PNET_BUFFER packet; /* only set on the last packet */
+  #endif
   PVOID *cb;
   grant_ref_t gref;
 } tx_shadow_t;

@@ -206,6 +206,7 @@ typedef struct {
 } rx_context_t;
 #endif
 
+#if NTDDI_VERSION < NTDDI_VISTA
 /*
  NDIS5 appears to insist that the checksum on received packets is correct, and won't
  believe us when we lie about it, which happens when the packet is generated on the
@@ -325,11 +326,12 @@ XenNet_SumPacketData(
   }
   return TRUE;
 }
+#endif
 
 static BOOLEAN
 XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
-  NDIS_STATUS status;
   #if NTDDI_VERSION < NTDDI_VISTA
+  NDIS_STATUS status;
   PNDIS_PACKET packet;
   #else
   PNET_BUFFER_LIST nbl;
@@ -588,11 +590,11 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
   } else if (pi->is_broadcast) {
     /* broadcast */
     xi->stats.ifHCInBroadcastPkts++;
-    xi->stats.ifHCInBroadcastOctets += NET_BUFFER_DATA_LENGTH(nb);
+    xi->stats.ifHCInBroadcastOctets += NET_BUFFER_DATA_LENGTH(packet);
   } else {
     /* unicast */
     xi->stats.ifHCInUcastPkts++;
-    xi->stats.ifHCInUcastOctets += NET_BUFFER_DATA_LENGTH(nb);
+    xi->stats.ifHCInUcastOctets += NET_BUFFER_DATA_LENGTH(packet);
   }
   #endif
 
@@ -1207,9 +1209,9 @@ XenNet_RxInit(xennet_info_t *xi) {
   nb_pool_parameters.Header.Size = NDIS_SIZEOF_NET_BUFFER_POOL_PARAMETERS_REVISION_1;
   nb_pool_parameters.PoolTag = XENNET_POOL_TAG;
   nb_pool_parameters.DataSize = 0; /* the buffers come from the ring */
-  xi->rx_nb_pool = NdisAllocateNetBufferPool(xi->adapter_handle, &nb_pool_parameters);
-  if (!xi->rx_nb_pool) {
-    KdPrint(("NdisAllocateNetBufferPool (rx_nb_pool) failed\n"));
+  xi->rx_packet_pool = NdisAllocateNetBufferPool(xi->adapter_handle, &nb_pool_parameters);
+  if (!xi->rx_packet_pool) {
+    KdPrint(("NdisAllocateNetBufferPool (rx_packet_pool) failed\n"));
     return FALSE;
   }
   #endif
@@ -1254,7 +1256,7 @@ FUNCTION_MSG("GGG\n");
   #if NTDDI_VERSION < NTDDI_VISTA
   NdisFreePacketPool(xi->rx_packet_pool);
   #else
-  NdisFreeNetBufferPool(xi->rx_nb_pool);
+  NdisFreeNetBufferPool(xi->rx_packet_pool);
   NdisFreeNetBufferListPool(xi->rx_nbl_pool);
   #endif
 

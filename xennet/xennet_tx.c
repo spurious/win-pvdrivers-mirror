@@ -59,6 +59,7 @@ XenNet_PutCbOnRing(struct xennet_info *xi, PVOID coalesce_buf, ULONG length, gra
   return tx;
 }
 
+#if 0
 static VOID dump_packet_data(PNDIS_PACKET packet, PCHAR header) {
   UINT mdl_count;
   PMDL first_mdl;
@@ -67,20 +68,26 @@ static VOID dump_packet_data(PNDIS_PACKET packet, PCHAR header) {
   NdisQueryPacket(packet, NULL, (PUINT)&mdl_count, &first_mdl, (PUINT)&total_length);
   FUNCTION_MSG("%s mdl_count = %d, first_mdl = %p, total_length = %d\n", header, mdl_count, first_mdl, total_length);
 }
+#endif
   
 /* Called at DISPATCH_LEVEL with tx_lock held */
 /*
  * Send one NDIS_PACKET. This may involve multiple entries on TX ring.
  */
+#if NTDDI_VERSION < NTDDI_VISTA
 static BOOLEAN
-XenNet_HWSendPacket(struct xennet_info *xi, PNDIS_PACKET packet)
-{
+XenNet_HWSendPacket(struct xennet_info *xi, PNDIS_PACKET packet) {
+#else
+static BOOLEAN
+XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER packet) {
+#endif
   struct netif_tx_request *tx0 = NULL;
   struct netif_tx_request *txN = NULL;
   struct netif_extra_info *ei = NULL;
   ULONG mss = 0;
   #if NTDDI_VERSION < NTDDI_VISTA
   PNDIS_TCP_IP_CHECKSUM_PACKET_INFO csum_info;
+  UINT mdl_count;
   #else
   NDIS_TCP_LARGE_SEND_OFFLOAD_NET_BUFFER_LIST_INFO lso_info;
   NDIS_TCP_IP_CHECKSUM_NET_BUFFER_LIST_INFO csum_info;
@@ -96,7 +103,6 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNDIS_PACKET packet)
   ULONG coalesce_remaining = 0;
   grant_ref_t gref;
   ULONG tx_length = 0;
-  UINT mdl_count;
   
   gref = XnAllocateGrant(xi->handle, (ULONG)'XNTX');
   if (gref == INVALID_GRANT_REF)
@@ -119,10 +125,10 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNDIS_PACKET packet)
   /* create a new MDL over the data portion of the first MDL in the packet... it's just easier this way */
   IoBuildPartialMdl(packet->CurrentMdl,
     &pi.first_mdl_storage,
-    (PUCHAR)MmGetMdlVirtualAddress(nb->CurrentMdl) + nb->CurrentMdlOffset,
-    MmGetMdlByteCount(nb->CurrentMdl) - nb->CurrentMdlOffset);
-  pi.total_length = nb->DataLength;
-  pi.first_mdl_storage.Next = nb->CurrentMdl->Next;
+    (PUCHAR)MmGetMdlVirtualAddress(packet->CurrentMdl) + packet->CurrentMdlOffset,
+    MmGetMdlByteCount(packet->CurrentMdl) - packet->CurrentMdlOffset);
+  pi.total_length = packet->DataLength;
+  pi.first_mdl_storage.Next = packet->CurrentMdl->Next;
   pi.first_mdl = pi.curr_mdl = &pi.first_mdl_storage;
   #endif
   pi.first_mdl_offset = pi.curr_mdl_offset = 0;
@@ -177,7 +183,7 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNDIS_PACKET packet)
     }
   }
   #else
-  csum_info.Value = NET_BUFFER_LIST_INFO(NB_NBL(nb), TcpIpChecksumNetBufferListInfo);
+  csum_info.Value = NET_BUFFER_LIST_INFO(NB_NBL(packet), TcpIpChecksumNetBufferListInfo);
   if (csum_info.Transmit.IsIPv4) {
     if (csum_info.Transmit.TcpChecksum) {
       flags |= NETTXF_csum_blank | NETTXF_data_validated;
@@ -192,7 +198,7 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNDIS_PACKET packet)
   #if NTDDI_VERSION < NTDDI_VISTA
   mss = PtrToUlong(NDIS_PER_PACKET_INFO_FROM_PACKET(packet, TcpLargeSendPacketInfo));
   #else
-  lso_info.Value = NET_BUFFER_LIST_INFO(NB_NBL(nb), TcpLargeSendNetBufferListInfo);
+  lso_info.Value = NET_BUFFER_LIST_INFO(NB_NBL(packet), TcpLargeSendNetBufferListInfo);
   switch (lso_info.Transmit.Type) {
   case NDIS_TCP_LARGE_SEND_OFFLOAD_V1_TYPE:
     mss = lso_info.LsoV1Transmit.MSS;
@@ -460,26 +466,26 @@ XenNet_TxBufferGC(struct xennet_info *xi, BOOLEAN dont_set_event) {
         header = MmGetSystemAddressForMdlSafe(mdl, LowPagePriority);
         #if NTDDI_VERSION < NTDDI_VISTA
         #else
-        header += NET_BUFFER_CURRENT_MDL_OFFSET(nb);
+        header += NET_BUFFER_CURRENT_MDL_OFFSET(packet);
         #endif
 
         #if NTDDI_VERSION < NTDDI_VISTA
         #else
-        xi->stats.ifHCOutOctets += nb->DataLength;
-        if (nb->DataLength < XN_HDR_SIZE || !(header[0] & 0x01)) {
+        xi->stats.ifHCOutOctets += packet->DataLength;
+        if (packet->DataLength < XN_HDR_SIZE || !(header[0] & 0x01)) {
           /* unicast or tiny packet */
           xi->stats.ifHCOutUcastPkts++;
-          xi->stats.ifHCOutUcastOctets += nb->DataLength;
+          xi->stats.ifHCOutUcastOctets += packet->DataLength;
         }
         else if (header[0] == 0xFF && header[1] == 0xFF && header[2] == 0xFF
                  && header[3] == 0xFF && header[4] == 0xFF && header[5] == 0xFF) {
           /* broadcast */
           xi->stats.ifHCOutBroadcastPkts++;
-          xi->stats.ifHCOutBroadcastOctets += nb->DataLength;
+          xi->stats.ifHCOutBroadcastOctets += packet->DataLength;
         } else {
           /* multicast */
           xi->stats.ifHCOutMulticastPkts++;
-          xi->stats.ifHCOutMulticastOctets += nb->DataLength;
+          xi->stats.ifHCOutMulticastOctets += packet->DataLength;
         }
         #endif
         
@@ -492,16 +498,16 @@ XenNet_TxBufferGC(struct xennet_info *xi, BOOLEAN dont_set_event) {
         }
         tail = packet;
         #else
-        nbl = NB_NBL(nb);
+        nbl = NB_NBL(packet);
         NBL_REF(nbl)--;
         if (!NBL_REF(nbl)) {
           NET_BUFFER_LIST_NEXT_NBL(nbl) = NULL;
-          if (nbl_head) {
-            NET_BUFFER_LIST_NEXT_NBL(nbl_tail) = nbl;
-            nbl_tail = nbl;
+          if (head) {
+            NET_BUFFER_LIST_NEXT_NBL(tail) = nbl;
+            tail = nbl;
           } else {
-            nbl_head = nbl;
-            nbl_tail = nbl;
+            head = nbl;
+            tail = nbl;
           }
         }
         #endif
@@ -531,8 +537,8 @@ XenNet_TxBufferGC(struct xennet_info *xi, BOOLEAN dont_set_event) {
     NdisMSendComplete(xi->adapter_handle, packet, NDIS_STATUS_SUCCESS);
   }
   #else
-  if (nbl_head)
-    NdisMSendNetBufferListsComplete(xi->adapter_handle, nbl_head, NDIS_SEND_COMPLETE_FLAGS_DISPATCH_LEVEL);
+  if (head)
+    NdisMSendNetBufferListsComplete(xi->adapter_handle, head, NDIS_SEND_COMPLETE_FLAGS_DISPATCH_LEVEL);
   #endif
 
   /* must be done after we have truly given back all packets */
@@ -620,7 +626,6 @@ XenNet_SendNetBufferLists(
 }
 #endif
 
-#if 0
 VOID
 XenNet_CancelSend(NDIS_HANDLE adapter_context, PVOID cancel_id)
 {
@@ -630,7 +635,6 @@ XenNet_CancelSend(NDIS_HANDLE adapter_context, PVOID cancel_id)
     
   FUNCTION_EXIT();
 }
-#endif
 
 BOOLEAN
 XenNet_TxInit(xennet_info_t *xi) {
@@ -695,8 +699,8 @@ XenNet_TxShutdown(xennet_info_t *xi) {
     NdisMSendComplete(xi->adapter_handle, packet, NDIS_STATUS_FAILURE);
     entry = RemoveHeadList(&xi->tx_waiting_pkt_list);
     #else
-    packet = CONTAINING_RECORD(nb_entry, NET_BUFFER, NB_LIST_ENTRY_FIELD);
-    nbl = NB_NBL(nb);
+    packet = CONTAINING_RECORD(entry, NET_BUFFER, NB_LIST_ENTRY_FIELD);
+    nbl = NB_NBL(packet);
     NBL_REF(nbl)--;
     if (!NBL_REF(nbl)) {
       nbl->Status = NDIS_STATUS_FAILURE;

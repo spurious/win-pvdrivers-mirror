@@ -523,7 +523,10 @@ XenNet_Disconnect(PVOID context, BOOLEAN suspend) {
     KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, NULL);
   }
   XnUnbindEvent(xi->handle, xi->event_channel);
+  
+#if NTDDI_VERSION < WINXP
   KeFlushQueuedDpcs();
+#endif
   XenNet_TxShutdown(xi);
   XenNet_RxShutdown(xi);
   //pfn = (PFN_NUMBER)(MmGetPhysicalAddress(xi->rx_sring).QuadPart >> PAGE_SHIFT);
@@ -537,7 +540,7 @@ XenNet_Disconnect(PVOID context, BOOLEAN suspend) {
   }
   xi->device_state = DEVICE_STATE_DISCONNECTED;
   return STATUS_SUCCESS;
-};
+}
 
 VOID
 XenNet_DeviceCallback(PVOID context, ULONG callback_type, PVOID value) {
