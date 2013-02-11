@@ -186,7 +186,7 @@ XenNet_Initialize(NDIS_HANDLE adapter_handle, NDIS_HANDLE driver_context, PNDIS_
     xi->frontend_sg_supported = TRUE;
   } else {
     FUNCTION_MSG("ScatterGather = %d\n", config_param->ParameterData.IntegerData);
-    xi->frontend_sg_supported = !!config_param->ParameterData.IntegerData;
+    xi->frontend_sg_supported = (BOOLEAN)!!config_param->ParameterData.IntegerData;
   }
   if (xi->frontend_sg_supported && ndis_os_minor_version < 1) {
     FUNCTION_MSG("No support for SG with NDIS 6.0, disabled\n");
@@ -242,7 +242,7 @@ XenNet_Initialize(NDIS_HANDLE adapter_handle, NDIS_HANDLE driver_context, PNDIS_
     xi->frontend_csum_supported = TRUE;
   } else {
     FUNCTION_MSG("ChecksumOffload = %d\n", config_param->ParameterData.IntegerData);
-    xi->frontend_csum_supported = !!config_param->ParameterData.IntegerData;
+    xi->frontend_csum_supported = (BOOLEAN)!!config_param->ParameterData.IntegerData;
   }
 
   NdisInitUnicodeString(&config_param_name, L"MTU");
@@ -669,8 +669,8 @@ DriverEntry(PDRIVER_OBJECT driver_object, PUNICODE_STRING registry_path)
 
   ndis_version = NdisGetVersion();
   
-  ndis_os_major_version = ndis_version >> 16;
-  ndis_os_minor_version = ndis_version & 0xFFFF;
+  ndis_os_major_version = (USHORT)(ndis_version >> 16);
+  ndis_os_minor_version = (USHORT)(ndis_version & 0xFFFF);
 
   FUNCTION_MSG("Driver MajorNdisVersion = %d, Driver MinorNdisVersion = %d\n", NDIS_MINIPORT_MAJOR_VERSION, NDIS_MINIPORT_MINOR_VERSION);
   FUNCTION_MSG("Windows MajorNdisVersion = %d, Windows MinorNdisVersion = %d\n", ndis_os_major_version, ndis_os_minor_version);
