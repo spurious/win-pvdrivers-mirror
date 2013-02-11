@@ -234,11 +234,15 @@ XenVbd_HandleEvent(PXENVBD_DEVICE_DATA xvdd) {
             xvdd->last_additional_sense_code = SCSI_ADSENSE_NO_SENSE;
             XenVbd_MakeAutoSense(xvdd, srb);
           }
-          //FUNCTION_MSG("Completing Srb = %p\n", srb);
           SxxxPortNotification(RequestComplete, xvdd, srb);
         }
       }
       put_shadow_on_freelist(xvdd, shadow);
+    }
+    
+    /* put queue'd Srbs onto the ring now so we can set the event in the best possible way */
+    if (dump_mode || xvdd->device_state == DEVICE_STATE_ACTIVE) {
+      XenVbd_ProcessSrbList(xvdd);
     }
 
     xvdd->ring.rsp_cons = i;
@@ -291,16 +295,13 @@ XenVbd_PutSrbOnRing(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
   NT_ASSERT(srb);
 
   if (!dump_mode) {
-#if 0
-    if (StorPortGetSystemAddress(xvdd, srb, &system_address) != STOR_STATUS_SUCCESS) {
+    if (SxxxPortGetSystemAddress(xvdd, srb, &system_address) != STATUS_SUCCESS) {
       FUNCTION_MSG("Failed to map DataBuffer\n");
       InsertHeadList(&xvdd->srb_list, (PLIST_ENTRY)srb->SrbExtension);
       //if (dump_mode) FUNCTION_EXIT();
       return FALSE;
     }
     system_address = (PUCHAR)system_address + srb_entry->offset;
-#endif
-    system_address = (PUCHAR)srb->DataBuffer + srb_entry->offset;
   } else {
     //FUNCTION_MSG("DataBuffer = %p\n", srb->DataBuffer);
     system_address = (PUCHAR)srb->DataBuffer + srb_entry->offset;
@@ -388,15 +389,6 @@ XenVbd_PutSrbOnRing(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
     ptr = shadow->system_address;
     shadow->aligned_buffer_in_use = FALSE;
   }
-
-  //KdPrint((__DRIVER_NAME "     sector_number = %d, block_count = %d\n", (ULONG)sector_number, block_count));
-  //KdPrint((__DRIVER_NAME "     DataBuffer   = %p\n", srb->DataBuffer));
-  //KdPrint((__DRIVER_NAME "     system_address   = %p\n", shadow->system_address));
-  //KdPrint((__DRIVER_NAME "     offset   = %d, length = %d\n", srb_entry->offset, srb_entry->length));
-  //KdPrint((__DRIVER_NAME "     ptr   = %p\n", ptr));
-
-  //KdPrint((__DRIVER_NAME "     handle = %d\n", shadow->req.handle));
-  //KdPrint((__DRIVER_NAME "     operation = %d\n", shadow->req.operation));
   
   remaining = block_count * 512;
   while (remaining > 0 && shadow->req.nr_segments < BLKIF_MAX_SEGMENTS_PER_REQUEST) {
@@ -445,17 +437,15 @@ XenVbd_PutSrbOnRing(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
   }
   srb_entry->offset += shadow->length;
   srb_entry->outstanding_requests++;
+  XenVbd_PutRequest(xvdd, &shadow->req);
   if (srb_entry->offset < srb_entry->length) {
-    if (dump_mode) KdPrint((__DRIVER_NAME "     inserting back into list\n"));
     /* put the srb back at the start of the queue to continue on the next request */
     InsertHeadList(&xvdd->srb_list, (PLIST_ENTRY)srb_entry);
   }
-  XenVbd_PutRequest(xvdd, &shadow->req);
   //if (dump_mode)
   //FUNCTION_EXIT();
   return TRUE;
 }
-
 
 static ULONG
 XenVbd_FillModePage(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
@@ -639,7 +629,7 @@ XenVbd_ResetBus(PXENVBD_DEVICE_DATA xvdd, ULONG PathId) {
   while((list_entry = RemoveHeadList(&xvdd->srb_list)) != &xvdd->srb_list) {
     #if DBG
     srb_list_entry_t *srb_entry = CONTAINING_RECORD(list_entry, srb_list_entry_t, list_entry);
-    KdPrint((__DRIVER_NAME "     adding queued SRB %p to reset list\n", srb_entry->srb));
+    FUNCTION_MSG("adding queued SRB %p to reset list\n", srb_entry->srb);
     #endif
     InsertTailList(&srb_reset_list, list_entry);
   }
@@ -692,7 +682,7 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
   PCDB cdb;
   ULONG data_transfer_length;
   UCHAR srb_status = SRB_STATUS_PENDING;
-  BOOLEAN notify = FALSE;
+  ULONG notify = FALSE;
   PSCSI_REQUEST_BLOCK srb;
   srb_list_entry_t *srb_entry;
   PSRB_IO_CONTROL sic;
@@ -1252,7 +1242,7 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
     }
     if ((PLIST_ENTRY)srb_entry == xvdd->srb_list.Flink && srb_entry->offset == prev_offset) {
       FUNCTION_MSG("Same entry\n");
-      /* same entry was put back onto the head of the list so we can't progress */
+      /* same entry was put back onto the head of the list unchanged so we can't progress */
       break;
     }
   }

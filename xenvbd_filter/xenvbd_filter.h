@@ -24,6 +24,10 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 #include <ntddk.h>
 #include <wdf.h>
+#if (NTDDI_VERSION < NTDDI_WINXP) /* srb.h causes warnings under 2K for some reason */
+#pragma warning(disable:4201) /* nameless struct/union */
+#pragma warning(disable:4214) /* bit field types other than int */
+#endif
 #include <srb.h>
 #include <ntstrsafe.h>
 #include "xen_windows.h"

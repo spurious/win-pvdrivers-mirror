@@ -1,6 +1,5 @@
 !INCLUDE "..\common.inc"
 TARGETNAME=xenvbdfilter
-INF_NAME=xenvbd_filter
 TARGETTYPE=DRIVER
 KMDF_VERSION_MAJOR=1
 !IF $(386)

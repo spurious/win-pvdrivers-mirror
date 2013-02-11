@@ -35,9 +35,8 @@ static VOID XenVbd_StopRing(PXENVBD_DEVICE_DATA xvdd, BOOLEAN suspend);
 static VOID XenVbd_StartRing(PXENVBD_DEVICE_DATA xvdd, BOOLEAN suspend);
 static VOID XenVbd_CompleteDisconnect(PXENVBD_DEVICE_DATA xvdd);
 
-//static BOOLEAN XenVbd_HwSxxxResetBus(PVOID DeviceExtension, ULONG PathId);
-
 #define SxxxPortNotification(...) StorPortNotification(__VA_ARGS__)
+#define SxxxPortGetSystemAddress(xvdd, srb, system_address) StorPortGetSystemAddress(xvdd, srb, system_address)
 
 static BOOLEAN dump_mode = FALSE;
 #define DUMP_MODE_ERROR_LIMIT 64
@@ -91,7 +90,7 @@ XenVbd_DisconnectWorkItem(PDEVICE_OBJECT device_object, PVOID context) {
 
 static VOID
 XenVbd_CompleteDisconnect(PXENVBD_DEVICE_DATA xvdd) {
-    IoQueueWorkItem(xvdd->disconnect_workitem, XenVbd_DisconnectWorkItem, DelayedWorkQueue, xvdd);
+  IoQueueWorkItem(xvdd->disconnect_workitem, XenVbd_DisconnectWorkItem, DelayedWorkQueue, xvdd);
 }
 
 /* called in non-dump mode */
@@ -251,113 +250,6 @@ XenVbd_HwStorInitialize(PVOID DeviceExtension)
   return TRUE;
 }
 
-#if 0
-/* called with StartIo lock held */
-static VOID
-XenVbd_HandleEvent(PVOID DeviceExtension)
-{
-  PXENVBD_DEVICE_DATA xvdd = (PXENVBD_DEVICE_DATA)DeviceExtension;
-  PSCSI_REQUEST_BLOCK srb;
-  RING_IDX i, rp;
-  ULONG j;
-  blkif_response_t *rep;
-  //int block_count;
-  int more_to_do = TRUE;
-  blkif_shadow_t *shadow;
-  srb_list_entry_t *srb_entry;
-
-  //if (dump_mode) FUNCTION_ENTER();
-
-  while (more_to_do)
-  {
-    rp = xvdd->ring.sring->rsp_prod;
-    KeMemoryBarrier();
-    for (i = xvdd->ring.rsp_cons; i != rp; i++)
-    {
-      rep = XenVbd_GetResponse(xvdd, i);
-      shadow = &xvdd->shadows[rep->id & SHADOW_ID_ID_MASK];
-      if (shadow->reset)
-      {
-        KdPrint((__DRIVER_NAME "     discarding reset shadow\n"));
-        for (j = 0; j < shadow->req.nr_segments; j++)
-        {
-          XnEndAccess(xvdd->handle,
-            shadow->req.seg[j].gref, FALSE, xvdd->grant_tag);
-        }
-      }
-      else if (dump_mode && !(rep->id & SHADOW_ID_DUMP_FLAG))
-      {
-        KdPrint((__DRIVER_NAME "     discarding stale (non-dump-mode) shadow\n"));
-      }
-      else
-      {
-        srb = shadow->srb;
-        NT_ASSERT(srb);
-        srb_entry = srb->SrbExtension;
-        NT_ASSERT(srb_entry);
-        /* a few errors occur in dump mode because Xen refuses to allow us to map pages we are using for other stuff. Just ignore them */
-        if (rep->status == BLKIF_RSP_OKAY || (dump_mode &&  dump_mode_errors++ < DUMP_MODE_ERROR_LIMIT))
-          srb->SrbStatus = SRB_STATUS_SUCCESS;
-        else
-        {
-          KdPrint((__DRIVER_NAME "     Xen Operation returned error\n"));
-          if (decode_cdb_is_read(srb))
-            KdPrint((__DRIVER_NAME "     Operation = Read\n"));
-          else
-            KdPrint((__DRIVER_NAME "     Operation = Write\n"));
-          srb_entry->error = TRUE;
-        }
-        if (shadow->aligned_buffer_in_use)
-        {
-          NT_ASSERT(xvdd->aligned_buffer_in_use);
-          xvdd->aligned_buffer_in_use = FALSE;
-          if (srb->SrbStatus == SRB_STATUS_SUCCESS && decode_cdb_is_read(srb))
-            memcpy((PUCHAR)shadow->system_address, xvdd->aligned_buffer, shadow->length);
-        }
-        for (j = 0; j < shadow->req.nr_segments; j++)
-        {
-          XnEndAccess(xvdd->handle, shadow->req.seg[j].gref, FALSE, xvdd->grant_tag);
-        }
-        srb_entry->outstanding_requests--;
-        if (!srb_entry->outstanding_requests && srb_entry->offset == srb_entry->length)
-        {
-          if (srb_entry->error)
-          {
-            srb->SrbStatus = SRB_STATUS_ERROR;
-            srb->ScsiStatus = 0x02;
-            xvdd->last_sense_key = SCSI_SENSE_MEDIUM_ERROR;
-            xvdd->last_additional_sense_code = SCSI_ADSENSE_NO_SENSE;
-            XenVbd_MakeAutoSense(xvdd, srb);
-          }        
-          StorPortNotification(RequestComplete, xvdd, srb);
-        }
-      }
-      put_shadow_on_freelist(xvdd, shadow);
-    }
-
-    xvdd->ring.rsp_cons = i;
-    if (i != xvdd->ring.req_prod_pvt)
-    {
-      RING_FINAL_CHECK_FOR_RESPONSES(&xvdd->ring, more_to_do);
-    }
-    else
-    {
-      xvdd->ring.sring->rsp_event = i + 1;
-      more_to_do = FALSE;
-    }
-  }
-
-  if (dump_mode || xvdd->device_state == DEVICE_STATE_ACTIVE) {
-    XenVbd_ProcessSrbList(xvdd);
-  } else if (xvdd->shadow_free == SHADOW_ENTRIES) {
-    FUNCTION_MSG("ring now empty - scheduling workitem for disconnect\n");
-    IoQueueWorkItem(xvdd->disconnect_workitem, XenVbd_DisconnectWorkItem, DelayedWorkQueue, xvdd);
-  }
-  //if (dump_mode) FUNCTION_EXIT();
-  return;
-}
-#endif
-
 static VOID
 XenVbd_HandleEventDpc(PSTOR_DPC dpc, PVOID DeviceExtension, PVOID arg1, PVOID arg2) {
   STOR_LOCK_HANDLE lock_handle;
@@ -388,79 +280,6 @@ XenVbd_HwStorInterrupt(PVOID DeviceExtension)
   //FUNCTION_EXIT();
   return TRUE;
 }
-
-#if 0
-static BOOLEAN
-XenVbd_HwSxxxResetBus(PVOID DeviceExtension, ULONG PathId)
-{
-  PXENVBD_DEVICE_DATA xvdd = DeviceExtension;
-  //srb_list_entry_t *srb_entry;
-  int i;
-  /* need to make sure that each SRB is only reset once */
-  LIST_ENTRY srb_reset_list;
-  PLIST_ENTRY list_entry;
-  //STOR_LOCK_HANDLE lock_handle;
-
-  UNREFERENCED_PARAMETER(PathId);
-
-  FUNCTION_ENTER();
-  
-  if (dump_mode) {
-    FUNCTION_MSG("dump mode - doing nothing\n");
-    FUNCTION_EXIT();
-    return TRUE;
-  }
-
-  /* It appears that the StartIo spinlock is already held at this point */
-
-  KdPrint((__DRIVER_NAME "     IRQL = %d\n", KeGetCurrentIrql()));
-
-  xvdd->aligned_buffer_in_use = FALSE;
-  
-  InitializeListHead(&srb_reset_list);
-  
-  while((list_entry = RemoveHeadList(&xvdd->srb_list)) != &xvdd->srb_list) {
-    #if DBG
-    srb_list_entry_t *srb_entry = CONTAINING_RECORD(list_entry, srb_list_entry_t, list_entry);
-    KdPrint((__DRIVER_NAME "     adding queued SRB %p to reset list\n", srb_entry->srb));
-    #endif
-    InsertTailList(&srb_reset_list, list_entry);
-  }
-  
-  for (i = 0; i < MAX_SHADOW_ENTRIES; i++) {
-    if (xvdd->shadows[i].srb) {
-      srb_list_entry_t *srb_entry = xvdd->shadows[i].srb->SrbExtension;
-      for (list_entry = srb_reset_list.Flink; list_entry != &srb_reset_list; list_entry = list_entry->Flink) {
-        if (list_entry == &srb_entry->list_entry)
-          break;
-      }
-      if (list_entry == &srb_reset_list) {
-        KdPrint((__DRIVER_NAME "     adding in-flight SRB %p to reset list\n", srb_entry->srb));
-        InsertTailList(&srb_reset_list, &srb_entry->list_entry);
-      }
-      /* set reset here so that the interrupt won't do anything with the srb but will dispose of the shadow entry correctly */
-      xvdd->shadows[i].reset = TRUE;
-      xvdd->shadows[i].srb = NULL;
-      xvdd->shadows[i].aligned_buffer_in_use = FALSE;
-    }
-  }
-
-  while((list_entry = RemoveHeadList(&srb_reset_list)) != &srb_reset_list) {
-    srb_list_entry_t *srb_entry = CONTAINING_RECORD(list_entry, srb_list_entry_t, list_entry);
-    srb_entry->srb->SrbStatus = SRB_STATUS_BUS_RESET;
-    KdPrint((__DRIVER_NAME "     completing SRB %p with status SRB_STATUS_BUS_RESET\n", srb_entry->srb));
-    StorPortNotification(RequestComplete, xvdd, srb_entry->srb);
-  }
-
-  /* send a notify to Dom0 just in case it was missed for some reason (which should _never_ happen normally but could in dump mode) */
-  XnNotify(xvdd->handle, xvdd->event_channel);
-
-  StorPortNotification(NextRequest, DeviceExtension);
-  FUNCTION_EXIT();
-
-  return TRUE;
-}
-#endif
 
 static BOOLEAN
 XenVbd_HwStorResetBus(PVOID DeviceExtension, ULONG PathId)
@@ -496,9 +315,10 @@ XenVbd_HwStorStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
     StorPortReleaseSpinLock (DeviceExtension, &lock_handle);
     return TRUE;
   }
-
   XenVbd_PutSrbOnList(xvdd, srb);
-  XenVbd_ProcessSrbList(xvdd);
+
+  /* HandleEvent also puts queued SRB's on the ring */
+  XenVbd_HandleEvent(xvdd);
   StorPortReleaseSpinLock (DeviceExtension, &lock_handle);
   //if (dump_mode) FUNCTION_EXIT();
   return TRUE;
@@ -586,7 +406,7 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
     VHwInitializationData.DeviceExtensionSize = FIELD_OFFSET(XENVBD_DEVICE_DATA, aligned_buffer_data) + UNALIGNED_BUFFER_DATA_SIZE;
     VHwInitializationData.SpecificLuExtensionSize = 0;
     VHwInitializationData.SrbExtensionSize = sizeof(srb_list_entry_t);
-    VHwInitializationData.NumberOfAccessRanges = 1;
+    VHwInitializationData.NumberOfAccessRanges = 0;
     VHwInitializationData.MapBuffers = STOR_MAP_ALL_BUFFERS;
     //VHwInitializationData.NeedPhysicalAddresses  = TRUE;
     VHwInitializationData.TaggedQueuing = TRUE;
@@ -606,7 +426,7 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
     HwInitializationData.AdapterInterfaceType = Internal; //PNPBus; /* not Internal */
     HwInitializationData.DeviceExtensionSize = FIELD_OFFSET(XENVBD_DEVICE_DATA, aligned_buffer_data) + UNALIGNED_BUFFER_DATA_SIZE_DUMP_MODE;
     HwInitializationData.SrbExtensionSize = sizeof(srb_list_entry_t);
-    HwInitializationData.NumberOfAccessRanges = 1;
+    HwInitializationData.NumberOfAccessRanges = 0;
     HwInitializationData.MapBuffers = STOR_MAP_NON_READ_WRITE_BUFFERS;
     HwInitializationData.NeedPhysicalAddresses  = TRUE;
     HwInitializationData.TaggedQueuing = FALSE;

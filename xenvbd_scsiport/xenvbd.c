@@ -38,9 +38,16 @@ static ULONG dump_mode_errors = 0;
 #define StorPortAcquireSpinLock(...) {}
 #define StorPortReleaseSpinLock(...) {}
 
+static ULONG
+SxxxPortGetSystemAddress(PVOID device_extension, PSCSI_REQUEST_BLOCK srb, PVOID *system_address) {
+  UNREFERENCED_PARAMETER(device_extension);
+  *system_address = (PUCHAR)srb->DataBuffer;
+  return STATUS_SUCCESS;
+}
+
 #define SxxxPortNotification(NotificationType, DeviceExtension, ...) XenVbd_Notification##NotificationType(DeviceExtension, __VA_ARGS__)
 
-VOID
+static VOID
 XenVbd_NotificationRequestComplete(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
   PXENVBD_SCSIPORT_DATA xvsd = (PXENVBD_SCSIPORT_DATA)xvdd->xvsd;
   srb_list_entry_t *srb_entry = srb->SrbExtension;
@@ -251,9 +258,8 @@ XenVbd_HwScsiStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb) {
     xvsd->outstanding++;
     XenVbd_PutSrbOnList(xvdd, srb);
   }
-  XenVbd_HandleEvent(xvdd); /* drain the ring */
-  XenVbd_ProcessSrbList(xvdd); /* put new requests on */
-  XenVbd_HandleEvent(xvdd); /* drain the ring again and also set event based on requests just added */
+  /* HandleEvent also puts queued SRB's on the ring */
+  XenVbd_HandleEvent(xvdd);
   /* need 2 spare slots - 1 for EVENT and 1 for STOP/START */
   if (xvsd->outstanding < 30) {
     ScsiPortNotification(NextLuRequest, xvsd, 0, 0, 0);
