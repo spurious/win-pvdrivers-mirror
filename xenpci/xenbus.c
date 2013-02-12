@@ -636,12 +636,11 @@ XenBus_AddWatch(
 
 char *
 XenBus_RemWatch(
-  PVOID Context,
-  xenbus_transaction_t xbt,
-  char *Path,
-  PXN_WATCH_CALLBACK ServiceRoutine,
-  PVOID ServiceContext)
-{
+    PVOID Context,
+    xenbus_transaction_t xbt,
+    char *Path,
+    PXN_WATCH_CALLBACK ServiceRoutine,
+    PVOID ServiceContext) {
   PXENPCI_DEVICE_DATA xpdd = Context;
   char *msg;
   int i;
@@ -652,20 +651,17 @@ XenBus_RemWatch(
 
   // check that Path < 128 chars
 
-  for (i = 0; i < MAX_WATCH_ENTRIES; i++)
-  {
+  for (i = 0; i < MAX_WATCH_ENTRIES; i++) {
     if (xpdd->XenBus_WatchEntries[i].Active
-      && !strcmp(xpdd->XenBus_WatchEntries[i].Path, Path)
-      && xpdd->XenBus_WatchEntries[i].ServiceRoutine == ServiceRoutine
-      && xpdd->XenBus_WatchEntries[i].ServiceContext == ServiceContext)
-    {
+        && !strcmp(xpdd->XenBus_WatchEntries[i].Path, Path)
+        && xpdd->XenBus_WatchEntries[i].ServiceRoutine == ServiceRoutine
+        && xpdd->XenBus_WatchEntries[i].ServiceContext == ServiceContext) {
       KdPrint((__DRIVER_NAME "     Match\n"));
       break;
     }
   }
 
-  if (i == MAX_WATCH_ENTRIES)
-  {
+  if (i == MAX_WATCH_ENTRIES) {
     ExReleaseFastMutex(&xpdd->xb_watch_mutex);
     KdPrint((__DRIVER_NAME "     Watch not set for %s - can't remove\n", Path));
     return NULL;

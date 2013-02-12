@@ -28,11 +28,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 static EVT_WDF_INTERRUPT_SYNCHRONIZE XenPci_EvtChn_Sync_Routine;
 static EVT_WDF_DEVICE_D0_ENTRY XenPciPdo_EvtDeviceD0Entry;
 static EVT_WDF_DEVICE_D0_EXIT XenPciPdo_EvtDeviceD0Exit;
-static EVT_WDF_DEVICE_PREPARE_HARDWARE XenPciPdo_EvtDevicePrepareHardware;
-static EVT_WDF_DEVICE_RELEASE_HARDWARE XenPciPdo_EvtDeviceReleaseHardware;
 static EVT_WDF_DEVICE_USAGE_NOTIFICATION XenPciPdo_EvtDeviceUsageNotification;
-//static EVT_WDFDEVICE_WDM_IRP_PREPROCESS XenPciPdo_EvtDeviceWdmIrpPreprocess_START_DEVICE;
-//static EVT_WDF_DEVICE_RESOURCE_REQUIREMENTS_QUERY XenPciPdo_EvtDeviceResourceRequirementsQuery;
 static EVT_WDF_DEVICE_PNP_STATE_CHANGE_NOTIFICATION XenPci_EvtDevicePnpStateChange;
 
 
@@ -63,99 +59,6 @@ XenPci_ReadBackendState(PXENPCI_PDO_DEVICE_DATA xppdd)
     XenPci_FreeMem(value);
     return backend_state;
   }
-}
-
-static VOID
-XenPci_UpdateBackendState(PVOID context)
-{
-  WDFDEVICE device = context;
-  PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
-  ULONG new_backend_state;
-
-  FUNCTION_ENTER();
-
-  ExAcquireFastMutex(&xppdd->backend_state_mutex);
-
-  new_backend_state = XenPci_ReadBackendState(xppdd);
-  if (new_backend_state == XenbusStateUnknown)
-  {
-    if (xpdd->suspend_state != SUSPEND_STATE_NONE)
-    {
-      ExReleaseFastMutex(&xppdd->backend_state_mutex);
-      return;
-    }
-    KdPrint(("Failed to read path, assuming closed\n"));
-    new_backend_state = XenbusStateClosed;
-  }
-
-  if (xppdd->backend_state == new_backend_state)
-  {
-    KdPrint((__DRIVER_NAME "     state unchanged\n"));
-    ExReleaseFastMutex(&xppdd->backend_state_mutex);
-    return;
-  }
-  
-  xppdd->backend_state = new_backend_state;
-
-  switch (xppdd->backend_state)
-  {
-  case XenbusStateUnknown:
-    KdPrint((__DRIVER_NAME "     Backend State Changed to Unknown\n"));
-    break;
-
-  case XenbusStateInitialising:
-    KdPrint((__DRIVER_NAME "     Backend State Changed to Initialising\n"));
-    break;
-
-  case XenbusStateInitWait:
-    KdPrint((__DRIVER_NAME "     Backend State Changed to InitWait\n"));
-    break;
-
-  case XenbusStateInitialised:
-    KdPrint((__DRIVER_NAME "     Backend State Changed to Initialised\n"));
-    break;
-
-  case XenbusStateConnected:
-    KdPrint((__DRIVER_NAME "     Backend State Changed to Connected\n"));  
-    break;
-
-  case XenbusStateClosing:
-    KdPrint((__DRIVER_NAME "     Backend State Changed to Closing\n"));
-    if (xppdd->frontend_state != XenbusStateClosing)
-    {
-      xppdd->backend_initiated_remove = TRUE;
-      KdPrint((__DRIVER_NAME "     Requesting eject\n"));
-      WdfPdoRequestEject(device);
-    }
-    break;
-
-  case XenbusStateClosed:
-    KdPrint((__DRIVER_NAME "     Backend State Changed to Closed\n"));
-    break;
-  
-  default:
-    KdPrint((__DRIVER_NAME "     Backend State Changed to Undefined = %d\n", xppdd->backend_state));
-    break;
-  }
-
-  KeSetEvent(&xppdd->backend_state_event, 1, FALSE);
-
-  ExReleaseFastMutex(&xppdd->backend_state_mutex);
-  FUNCTION_EXIT();
-
-  return;
-}
-
-static VOID
-XenPci_BackendStateHandler(char *path, PVOID context)
-{
-  UNREFERENCED_PARAMETER(path);
-
-  /* check that path == device/id/state */
-  //RtlStringCbPrintfA(path, ARRAY_SIZE(path), "%s/state", xppdd->path);
-
-  XenPci_UpdateBackendState(context);
 }
 
 static NTSTATUS
@@ -242,18 +145,16 @@ XenPci_ResumePdo(WDFDEVICE device) {
 }
 
 NTSTATUS
-XenPciPdo_EvtDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previous_state)
-{
+XenPciPdo_EvtDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previous_state) {
   NTSTATUS status = STATUS_SUCCESS;
   PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
+  //PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
   CHAR path[128];
   
   FUNCTION_ENTER();
   KdPrint((__DRIVER_NAME "     path = %s\n", xppdd->path));
 
-  switch (previous_state)
-  {
+  switch (previous_state) {
   case WdfPowerDeviceD0:
     KdPrint((__DRIVER_NAME "     WdfPowerDeviceD1\n"));
     break;
@@ -265,8 +166,7 @@ XenPciPdo_EvtDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previous_sta
     break;
   case WdfPowerDeviceD3:
     KdPrint((__DRIVER_NAME "     WdfPowerDeviceD3\n"));
-    if (xppdd->hiber_usage_kludge)
-    {
+    if (xppdd->hiber_usage_kludge) {
       KdPrint((__DRIVER_NAME "     (but really WdfPowerDevicePrepareForHibernation)\n"));
       previous_state = WdfPowerDevicePrepareForHibernation;
     }
@@ -283,45 +183,15 @@ XenPciPdo_EvtDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previous_sta
   }
 
   status = XenPci_GetBackendDetails(device);
-  if (!NT_SUCCESS(status))
-  {
+  if (!NT_SUCCESS(status)) {
     WdfDeviceSetFailed(device, WdfDeviceFailedNoRestart);
     FUNCTION_EXIT_STATUS(status);
     return status;
   }
 
-  if (previous_state == WdfPowerDeviceD3 || previous_state == WdfPowerDeviceD3Final)
-  {
-#if 0
-    xppdd->requested_resources_ptr = xppdd->requested_resources_start;
-    xppdd->assigned_resources_start = xppdd->assigned_resources_ptr = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, XENPCI_POOL_TAG);
-    XenConfig_InitConfigPage(device);
-    status = XenPci_XenConfigDevice(device);
-#endif
-  }
-  else if (previous_state == WdfPowerDevicePrepareForHibernation)
-  {
-#if 0
-    PVOID src, dst;
-    
-    ADD_XEN_INIT_REQ(&xppdd->requested_resources_ptr, XEN_INIT_TYPE_END, NULL, NULL, NULL);
-    src = xppdd->requested_resources_start;
-    xppdd->requested_resources_ptr = xppdd->requested_resources_start = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, XENPCI_POOL_TAG);
-    xppdd->assigned_resources_ptr = xppdd->assigned_resources_start;
-
-    dst = MmMapIoSpace(xppdd->config_page_phys, xppdd->config_page_length, MmNonCached);
-
-    status = XenPci_XenConfigDeviceSpecifyBuffers(device, src, dst);
-
-    MmUnmapIoSpace(dst, xppdd->config_page_length);
-    ExFreePoolWithTag(src, XENPCI_POOL_TAG);
-#endif
-  }
-
-  if (!NT_SUCCESS(status))
-  {
+  if (!NT_SUCCESS(status)) {
     RtlStringCbPrintfA(path, ARRAY_SIZE(path), "%s/state", xppdd->backend_path);
-    XenBus_RemWatch(xpdd, XBT_NIL, path, XenPci_BackendStateHandler, device);
+    //XenBus_RemWatch(xpdd, XBT_NIL, path, XenPci_BackendStateHandler, device);
     WdfDeviceSetFailed(device, WdfDeviceFailedNoRestart);
     FUNCTION_EXIT_STATUS(status);
     return status;
@@ -333,11 +203,10 @@ XenPciPdo_EvtDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previous_sta
 }
 
 NTSTATUS
-XenPciPdo_EvtDeviceD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE target_state)
-{
+XenPciPdo_EvtDeviceD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE target_state) {
   NTSTATUS status = STATUS_SUCCESS;
   PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
+  //PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
   char path[128];
   
   UNREFERENCED_PARAMETER(device);
@@ -346,8 +215,7 @@ XenPciPdo_EvtDeviceD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE target_state)
   FUNCTION_ENTER();
   KdPrint((__DRIVER_NAME "     path = %s\n", xppdd->path));
   
-  switch (target_state)
-  {
+  switch (target_state) {
   case WdfPowerDeviceD0:
     KdPrint((__DRIVER_NAME "     WdfPowerDeviceD1\n"));
     break;
@@ -359,8 +227,7 @@ XenPciPdo_EvtDeviceD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE target_state)
     break;
   case WdfPowerDeviceD3:
     KdPrint((__DRIVER_NAME "     WdfPowerDeviceD3\n"));
-    if (xppdd->hiber_usage_kludge)
-    {
+    if (xppdd->hiber_usage_kludge) {
       KdPrint((__DRIVER_NAME "     (but really WdfPowerDevicePrepareForHibernation)\n"));
       target_state = WdfPowerDevicePrepareForHibernation;
     }
@@ -381,46 +248,11 @@ XenPciPdo_EvtDeviceD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE target_state)
     KdPrint((__DRIVER_NAME "     not powering down as we are hibernating\n"));
     // should we set the backend state here so it's correct on resume???
   }
-  else
-  {
-#if 0
-    status = XenPci_XenShutdownDevice(device);
-#endif
-  }
   
   /* Remove watch on backend state */
   RtlStringCbPrintfA(path, ARRAY_SIZE(path), "%s/state", xppdd->backend_path);
-  XenBus_RemWatch(xpdd, XBT_NIL, path, XenPci_BackendStateHandler, device);
+  //XenBus_RemWatch(xpdd, XBT_NIL, path, XenPci_BackendStateHandler, device);
   
-  FUNCTION_EXIT();
-  
-  return status;
-}
-
-NTSTATUS
-XenPciPdo_EvtDevicePrepareHardware(WDFDEVICE device, WDFCMRESLIST resources_raw, WDFCMRESLIST resources_translated)
-{
-  NTSTATUS status = STATUS_SUCCESS;
-
-  UNREFERENCED_PARAMETER(device);
-  UNREFERENCED_PARAMETER(resources_raw);
-  UNREFERENCED_PARAMETER(resources_translated);
-  
-  FUNCTION_ENTER();
-  FUNCTION_EXIT();
-  
-  return status;
-}
-
-NTSTATUS
-XenPciPdo_EvtDeviceReleaseHardware(WDFDEVICE device, WDFCMRESLIST resources_translated)
-{
-  NTSTATUS status = STATUS_SUCCESS;
-  
-  UNREFERENCED_PARAMETER(device);
-  UNREFERENCED_PARAMETER(resources_translated);
-  
-  FUNCTION_ENTER();
   FUNCTION_EXIT();
   
   return status;
@@ -502,11 +334,7 @@ XenPci_EvtChildListCreateDevice(WDFCHILDLIST child_list,
   
   WDF_PNPPOWER_EVENT_CALLBACKS_INIT(&child_pnp_power_callbacks);
   child_pnp_power_callbacks.EvtDeviceD0Entry = XenPciPdo_EvtDeviceD0Entry;
-  //child_pnp_power_callbacks.EvtDeviceD0EntryPostInterruptsEnabled = XenPciPdo_EvtDeviceD0EntryPostInterruptsEnabled;
   child_pnp_power_callbacks.EvtDeviceD0Exit = XenPciPdo_EvtDeviceD0Exit;
-  //child_pnp_power_callbacks.EvtDeviceD0ExitPreInterruptsDisabled = XenPciPdo_EvtDeviceD0ExitPreInterruptsDisabled;
-  child_pnp_power_callbacks.EvtDevicePrepareHardware = XenPciPdo_EvtDevicePrepareHardware;
-  child_pnp_power_callbacks.EvtDeviceReleaseHardware = XenPciPdo_EvtDeviceReleaseHardware;
   child_pnp_power_callbacks.EvtDeviceUsageNotification = XenPciPdo_EvtDeviceUsageNotification;
   WdfDeviceInitSetPnpPowerEventCallbacks(child_init, &child_pnp_power_callbacks);
 
