@@ -259,13 +259,8 @@ XenVbd_HandleEvent(PXENVBD_DEVICE_DATA xvdd) {
     }
   }
 
-#if 0
-  if (dump_mode || xvdd->device_state == DEVICE_STATE_ACTIVE) {
-    XenVbd_ProcessSrbList(xvdd);
-  } else
-#endif
-  if (xvdd->device_state != DEVICE_STATE_ACTIVE && xvdd->shadow_free == SHADOW_ENTRIES) {
-    FUNCTION_MSG("ring now empty - comleting disconnect\n");
+  if (xvdd->device_state != DEVICE_STATE_ACTIVE && xvdd->device_state != DEVICE_STATE_INACTIVE && xvdd->shadow_free == SHADOW_ENTRIES) {
+    FUNCTION_MSG("ring now empty - completing disconnect\n");
     XenVbd_CompleteDisconnect(xvdd);
   }
   return;

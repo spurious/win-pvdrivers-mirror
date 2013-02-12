@@ -74,9 +74,8 @@ XenVbd_Connect(PXENVBD_DEVICE_DATA xvdd, BOOLEAN suspend) {
   if (!(((qemu_hide_flags_value & QEMU_UNPLUG_ALL_IDE_DISKS) && xvdd->device_type != XENVBD_DEVICETYPE_CDROM) || qemu_hide_filter)) {
     /* we never set backend state active if we are inactive */
     FUNCTION_MSG("Inactive\n");
+    XnCloseDevice(xvdd->handle);
     xvdd->device_state = DEVICE_STATE_INACTIVE;
-    /* still need to call StartRing here */
-    XenVbd_StartRing(xvdd, suspend);
     return STATUS_SUCCESS;
   }
   status = XnBindEvent(xvdd->handle, &xvdd->event_channel, XenVbd_HandleEventDIRQL, xvdd);
@@ -153,6 +152,11 @@ XenVbd_Disconnect(PVOID DeviceExtension, BOOLEAN suspend) {
   NTSTATUS status;
   PXENVBD_DEVICE_DATA xvdd = (PXENVBD_DEVICE_DATA)DeviceExtension;
   PFN_NUMBER pfn;
+
+  if (xvdd->device_state == DEVICE_STATE_INACTIVE) {
+    /* state stays INACTIVE */
+    return STATUS_SUCCESS;
+  } 
 
   if (xvdd->device_state != DEVICE_STATE_ACTIVE) {
     FUNCTION_MSG("state not DEVICE_STATE_ACTIVE, is %d instead\n", xvdd->device_state);
