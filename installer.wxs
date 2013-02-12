@@ -79,7 +79,7 @@
                 <difx:Driver Sequence='99' Legacy='yes' PlugAndPlayPrompt='no' ForceInstall='yes' />
               </Component>
             </Directory>
-            <?if $(env.DDK_TARGET_OS) = Win2K OR $(env.DDK_TARGET_OS) = WinXP OR $(env.DDK_TARGET_OS) = WinNet ?>
+            <?if $(env.DDK_TARGET_OS) = Win2K OR $(env.DDK_TARGET_OS) = WinXP OR $(env.DDK_TARGET_OS) = WinNET ?>
             <Directory Id='XenVbdDir' Name='xenvbd'>
               <Component Id='XenVbd' Guid='1F05DC54-974C-40f6-BF41-0EFDB3EBD1DC'>
                 <File Id='xenvbd.cat' Name='xenvbd.cat' DiskId='1' Source='xenvbd_scsiport\obj$(env.BUILD_ALT_DIR)\$(var.ARCHDIR)\xenvbd.cat' />
