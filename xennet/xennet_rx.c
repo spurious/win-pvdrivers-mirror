@@ -710,8 +710,6 @@ done:
   return;
 }
 
-ULONG outstanding1 = 0, outstanding2 = 0, outstanding3 = 0;
-
 #if NTDDI_VERSION < NTDDI_VISTA
 /* called at DISPATCH_LEVEL */
 /* it's okay for return packet to be called while resume_state != RUNNING as the packet will simply be added back to the freelist, the grants will be fixed later */
@@ -741,8 +739,7 @@ XenNet_ReturnPacket(NDIS_HANDLE adapter_context, PNDIS_PACKET packet) {
   }
 
   NdisFreePacket(packet);
-  outstanding1--;
-  outstanding3--;
+  InterlockedDecrement(&xi->rx_outstanding);
   if (!xi->rx_outstanding && xi->device_state != DEVICE_STATE_ACTIVE)
     KeSetEvent(&xi->rx_idle_event, IO_NO_INCREMENT, FALSE);
   //FUNCTION_EXIT();
@@ -1077,17 +1074,12 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
       last_header_only_packet = packet;
       PACKET_NEXT_PACKET(packet) = NULL;
     }
-    outstanding1++;
-    if (status == NDIS_STATUS_RESOURCES)
-      outstanding2++;
     packets[packet_count++] = packet;
-    InterlockedIncrement(&xi->rx_outstanding);
     /* if we indicate a packet with NDIS_STATUS_RESOURCES then any following packet can't be NDIS_STATUS_SUCCESS */
     if (packet_count == MAXIMUM_PACKETS_PER_INDICATE || !rc.first_packet
         || (NDIS_GET_PACKET_STATUS(rc.first_packet) == NDIS_STATUS_SUCCESS
         && status == NDIS_STATUS_RESOURCES)) {
       NdisMIndicateReceivePacket(xi->adapter_handle, packets, packet_count);
-      outstanding3 += packet_count;
       packet_count = 0;
     }
   }
@@ -1096,7 +1088,6 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
     PNDIS_PACKET packet = first_header_only_packet;
     first_header_only_packet = PACKET_NEXT_PACKET(packet);
     XenNet_ReturnPacket(xi, packet);
-    outstanding2--;
   }
   #else
   if (rc.first_nbl) {
@@ -1225,33 +1216,26 @@ XenNet_RxInit(xennet_info_t *xi) {
 VOID
 XenNet_RxShutdown(xennet_info_t *xi) {
   KIRQL old_irql;
-  UNREFERENCED_PARAMETER(xi);
+  UNREFERENCED_PARAMETER(xi);  
 
   FUNCTION_ENTER();
 
   KeAcquireSpinLock(&xi->rx_lock, &old_irql);
   while (xi->rx_outstanding) {
-    FUNCTION_MSG("Waiting for all packets to be returned\n");
+    FUNCTION_MSG("Waiting for %d packets to be returned\n", xi->rx_outstanding);
     KeReleaseSpinLock(&xi->rx_lock, old_irql);
-FUNCTION_MSG("AAA\n");
     KeWaitForSingleObject(&xi->rx_idle_event, Executive, KernelMode, FALSE, NULL);
-FUNCTION_MSG("BBB\n");
     KeAcquireSpinLock(&xi->rx_lock, &old_irql);
-FUNCTION_MSG("CCC\n");
   }
   KeReleaseSpinLock(&xi->rx_lock, old_irql);
-FUNCTION_MSG("DDD\n");
   
   XenNet_BufferFree(xi);
-FUNCTION_MSG("EEE\n");
 
   stack_delete(xi->rx_pb_stack, NULL, NULL);
   stack_delete(xi->rx_hb_stack, NULL, NULL);
   
-FUNCTION_MSG("FFF\n");
 
   ExFreePoolWithTag(xi->rxpi, XENNET_POOL_TAG);
-FUNCTION_MSG("GGG\n");
 
   #if NTDDI_VERSION < NTDDI_VISTA
   NdisFreePacketPool(xi->rx_packet_pool);

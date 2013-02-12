@@ -381,51 +381,55 @@ XenNet_Connect(PVOID context, BOOLEAN suspend) {
     /* continue with setup so all the flags and capabilities are correct */
   }
 
-  for (i = 0; i <= 5 && xi->backend_state != XenbusStateInitialising && xi->backend_state != XenbusStateInitWait && xi->backend_state != XenbusStateInitialised; i++) {
-    FUNCTION_MSG("Waiting for XenbusStateInitXxx\n");
-    KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, NULL);
-  }
-  if (xi->backend_state != XenbusStateInitialising && xi->backend_state != XenbusStateInitWait && xi->backend_state != XenbusStateInitialised) {
-    FUNCTION_MSG("Backend state timeout\n");
-    return STATUS_UNSUCCESSFUL;
-  }
-  if (!NT_SUCCESS(status = XnBindEvent(xi->handle, &xi->event_channel, XenNet_HandleEvent_DIRQL, xi))) {
-    FUNCTION_MSG("Cannot allocate event channel\n");
-    return STATUS_UNSUCCESSFUL;
-  }
-  FUNCTION_MSG("event_channel = %d\n", xi->event_channel);
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "event-channel", xi->event_channel);
-  xi->tx_sring = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, XENNET_POOL_TAG);
-  if (!xi->tx_sring) {
-    FUNCTION_MSG("Cannot allocate tx_sring\n");
-    return STATUS_UNSUCCESSFUL;
-  }
-  SHARED_RING_INIT(xi->tx_sring);
-  FRONT_RING_INIT(&xi->tx_ring, xi->tx_sring, PAGE_SIZE);
-  pfn = (PFN_NUMBER)(MmGetPhysicalAddress(xi->tx_sring).QuadPart >> PAGE_SHIFT);
-  FUNCTION_MSG("tx sring pfn = %d\n", (ULONG)pfn);
-  xi->tx_sring_gref = XnGrantAccess(xi->handle, (ULONG)pfn, FALSE, INVALID_GRANT_REF, XENNET_POOL_TAG);
-  FUNCTION_MSG("tx sring_gref = %d\n", xi->tx_sring_gref);
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "tx-ring-ref", xi->tx_sring_gref);  
-  xi->rx_sring = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, XENNET_POOL_TAG);
-  if (!xi->rx_sring) {
-    FUNCTION_MSG("Cannot allocate rx_sring\n");
-    return STATUS_UNSUCCESSFUL;
-  }
-  SHARED_RING_INIT(xi->rx_sring);
-  FRONT_RING_INIT(&xi->rx_ring, xi->rx_sring, PAGE_SIZE);
-  pfn = (PFN_NUMBER)(MmGetPhysicalAddress(xi->rx_sring).QuadPart >> PAGE_SHIFT);
-  FUNCTION_MSG("rx sring pfn = %d\n", (ULONG)pfn);
-  xi->rx_sring_gref = XnGrantAccess(xi->handle, (ULONG)pfn, FALSE, INVALID_GRANT_REF, XENNET_POOL_TAG);
-  FUNCTION_MSG("rx sring_gref = %d\n", xi->rx_sring_gref);
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "rx-ring-ref", xi->rx_sring_gref);  
+  if (xi->device_state != DEVICE_STATE_INACTIVE) {
+    for (i = 0; i <= 5 && xi->backend_state != XenbusStateInitialising && xi->backend_state != XenbusStateInitWait && xi->backend_state != XenbusStateInitialised; i++) {
+      FUNCTION_MSG("Waiting for XenbusStateInitXxx\n");
+      if (xi->backend_state == XenbusStateClosed) {
+        status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "state", XenbusStateInitialising);
+      }
+      KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, NULL);
+    }
+    if (xi->backend_state != XenbusStateInitialising && xi->backend_state != XenbusStateInitWait && xi->backend_state != XenbusStateInitialised) {
+      FUNCTION_MSG("Backend state timeout\n");
+      return STATUS_UNSUCCESSFUL;
+    }
+    if (!NT_SUCCESS(status = XnBindEvent(xi->handle, &xi->event_channel, XenNet_HandleEvent_DIRQL, xi))) {
+      FUNCTION_MSG("Cannot allocate event channel\n");
+      return STATUS_UNSUCCESSFUL;
+    }
+    FUNCTION_MSG("event_channel = %d\n", xi->event_channel);
+    status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "event-channel", xi->event_channel);
+    xi->tx_sring = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, XENNET_POOL_TAG);
+    if (!xi->tx_sring) {
+      FUNCTION_MSG("Cannot allocate tx_sring\n");
+      return STATUS_UNSUCCESSFUL;
+    }
+    SHARED_RING_INIT(xi->tx_sring);
+    FRONT_RING_INIT(&xi->tx_ring, xi->tx_sring, PAGE_SIZE);
+    pfn = (PFN_NUMBER)(MmGetPhysicalAddress(xi->tx_sring).QuadPart >> PAGE_SHIFT);
+    FUNCTION_MSG("tx sring pfn = %d\n", (ULONG)pfn);
+    xi->tx_sring_gref = XnGrantAccess(xi->handle, (ULONG)pfn, FALSE, INVALID_GRANT_REF, XENNET_POOL_TAG);
+    FUNCTION_MSG("tx sring_gref = %d\n", xi->tx_sring_gref);
+    status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "tx-ring-ref", xi->tx_sring_gref);  
+    xi->rx_sring = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, XENNET_POOL_TAG);
+    if (!xi->rx_sring) {
+      FUNCTION_MSG("Cannot allocate rx_sring\n");
+      return STATUS_UNSUCCESSFUL;
+    }
+    SHARED_RING_INIT(xi->rx_sring);
+    FRONT_RING_INIT(&xi->rx_ring, xi->rx_sring, PAGE_SIZE);
+    pfn = (PFN_NUMBER)(MmGetPhysicalAddress(xi->rx_sring).QuadPart >> PAGE_SHIFT);
+    FUNCTION_MSG("rx sring pfn = %d\n", (ULONG)pfn);
+    xi->rx_sring_gref = XnGrantAccess(xi->handle, (ULONG)pfn, FALSE, INVALID_GRANT_REF, XENNET_POOL_TAG);
+    FUNCTION_MSG("rx sring_gref = %d\n", xi->rx_sring_gref);
+    status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "rx-ring-ref", xi->rx_sring_gref);  
 
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "request-rx-copy", 1);
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "request-rx-notify", 1);
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "feature-no-csum-offload", !xi->frontend_csum_supported);
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "feature-sg", (int)xi->frontend_sg_supported);
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "feature-gso-tcpv4", !!xi->frontend_gso_value);
-
+    status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "request-rx-copy", 1);
+    status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "request-rx-notify", 1);
+    status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "feature-no-csum-offload", !xi->frontend_csum_supported);
+    status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "feature-sg", (int)xi->frontend_sg_supported);
+    status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "feature-gso-tcpv4", !!xi->frontend_gso_value);
+  }
   status = XnReadInt32(xi->handle, XN_BASE_BACKEND, "feature-sg", &tmp_ulong);
   if (tmp_ulong) {
     xi->backend_sg_supported = TRUE;
@@ -482,18 +486,20 @@ XenNet_Connect(PVOID context, BOOLEAN suspend) {
     xi->curr_mac_addr[0], xi->curr_mac_addr[1], xi->curr_mac_addr[2], 
     xi->curr_mac_addr[3], xi->curr_mac_addr[4], xi->curr_mac_addr[5]);
 
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "state", XenbusStateConnected);
+  if (xi->device_state != DEVICE_STATE_INACTIVE) {
+    status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "state", XenbusStateConnected);
 
-  for (i = 0; i <= 5 && xi->backend_state != XenbusStateConnected; i++) {
-    FUNCTION_MSG("Waiting for XenbusStateConnected\n");
-    KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, NULL);
+    for (i = 0; i <= 5 && xi->backend_state != XenbusStateConnected; i++) {
+      FUNCTION_MSG("Waiting for XenbusStateConnected\n");
+      KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, NULL);
+    }
+    if (xi->backend_state != XenbusStateConnected) {
+      FUNCTION_MSG("Backend state timeout\n");
+      return STATUS_UNSUCCESSFUL;
+    }
+    XenNet_TxInit(xi);
+    XenNet_RxInit(xi);
   }
-  if (xi->backend_state != XenbusStateConnected) {
-    FUNCTION_MSG("Backend state timeout\n");
-    return STATUS_UNSUCCESSFUL;
-  }
-  XenNet_TxInit(xi);
-  XenNet_RxInit(xi);
 
   /* we don't set device_state = DEVICE_STATE_ACTIVE here - has to be done during init once ndis is ready */
   
@@ -506,35 +512,35 @@ XenNet_Disconnect(PVOID context, BOOLEAN suspend) {
   //PFN_NUMBER pfn;
   NTSTATUS status;
 
-  if (xi->device_state != DEVICE_STATE_ACTIVE) {
-    FUNCTION_MSG("state not DEVICE_STATE_ACTIVE, is %d instead\n", xi->device_state);
+  if (xi->device_state != DEVICE_STATE_ACTIVE && xi->device_state != DEVICE_STATE_INACTIVE) {
+    FUNCTION_MSG("state not DEVICE_STATE_(IN)ACTIVE, is %d instead\n", xi->device_state);
     FUNCTION_EXIT();
     return STATUS_SUCCESS;
   }
-  xi->device_state = DEVICE_STATE_DISCONNECTING;
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "state", XenbusStateClosing);
-  while (xi->backend_state != XenbusStateClosing && xi->backend_state != XenbusStateClosed) {
-    FUNCTION_MSG("Waiting for XenbusStateClosing/Closed\n");
-    KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, NULL);
+  if (xi->device_state != DEVICE_STATE_INACTIVE) {
+    xi->device_state = DEVICE_STATE_DISCONNECTING;
+    status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "state", XenbusStateClosing);
+    while (xi->backend_state != XenbusStateClosing && xi->backend_state != XenbusStateClosed) {
+      FUNCTION_MSG("Waiting for XenbusStateClosing/Closed\n");
+      KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, NULL);
+    }
+    status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "state", XenbusStateClosed);
+    while (xi->backend_state != XenbusStateClosed) {
+      FUNCTION_MSG("Waiting for XenbusStateClosed\n");
+      KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, NULL);
+    }
+    XnUnbindEvent(xi->handle, xi->event_channel);
+    
+  #if NTDDI_VERSION < WINXP
+    KeFlushQueuedDpcs();
+  #endif
+    XenNet_TxShutdown(xi);
+    XenNet_RxShutdown(xi);
+    XnEndAccess(xi->handle, xi->rx_sring_gref, FALSE, XENNET_POOL_TAG);
+    ExFreePoolWithTag(xi->rx_sring, XENNET_POOL_TAG);
+    XnEndAccess(xi->handle, xi->tx_sring_gref, FALSE, XENNET_POOL_TAG);
+    ExFreePoolWithTag(xi->tx_sring, XENNET_POOL_TAG);
   }
-  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "state", XenbusStateClosed);
-  while (xi->backend_state != XenbusStateClosed) {
-    FUNCTION_MSG("Waiting for XenbusStateClosed\n");
-    KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, NULL);
-  }
-  XnUnbindEvent(xi->handle, xi->event_channel);
-  
-#if NTDDI_VERSION < WINXP
-  KeFlushQueuedDpcs();
-#endif
-  XenNet_TxShutdown(xi);
-  XenNet_RxShutdown(xi);
-  //pfn = (PFN_NUMBER)(MmGetPhysicalAddress(xi->rx_sring).QuadPart >> PAGE_SHIFT);
-  XnEndAccess(xi->handle, xi->rx_sring_gref, FALSE, XENNET_POOL_TAG);
-  ExFreePoolWithTag(xi->rx_sring, XENNET_POOL_TAG);
-  //pfn = (PFN_NUMBER)(MmGetPhysicalAddress(xi->tx_sring).QuadPart >> PAGE_SHIFT);
-  XnEndAccess(xi->handle, xi->tx_sring_gref, FALSE, XENNET_POOL_TAG);
-  ExFreePoolWithTag(xi->tx_sring, XENNET_POOL_TAG);
   if (!suspend) {
     XnCloseDevice(xi->handle);
   }
@@ -565,8 +571,11 @@ XenNet_DeviceCallback(PVOID context, ULONG callback_type, PVOID value) {
     break;
   case XN_DEVICE_CALLBACK_RESUME:
     FUNCTION_MSG("XN_DEVICE_CALLBACK_RESUME");
+    xi->device_state = DEVICE_STATE_INITIALISING;
     XenNet_Connect(xi, TRUE);
-    //xi->device_state = DEVICE_STATE_ACTIVE;
+    if (xi->device_state != DEVICE_STATE_INACTIVE) {
+      xi->device_state = DEVICE_STATE_ACTIVE;
+    }
     KeInsertQueueDpc(&xi->rxtx_dpc, NULL, NULL);
     break;
   }
