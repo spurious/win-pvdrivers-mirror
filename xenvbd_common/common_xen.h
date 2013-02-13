@@ -46,7 +46,7 @@ XenVbd_Connect(PXENVBD_DEVICE_DATA xvdd, BOOLEAN suspend) {
   if (!xvdd->sring) {
     return STATUS_UNSUCCESSFUL;
   }
-  pfn = (PFN_NUMBER)MmGetPhysicalAddress(xvdd->sring).QuadPart >> PAGE_SHIFT;
+  pfn = (PFN_NUMBER)(MmGetPhysicalAddress(xvdd->sring).QuadPart >> PAGE_SHIFT);
   xvdd->sring_gref = XnGrantAccess(xvdd->handle, (ULONG)pfn, FALSE, INVALID_GRANT_REF, xvdd->grant_tag);
   SHARED_RING_INIT(xvdd->sring);
   FRONT_RING_INIT(&xvdd->ring, xvdd->sring, PAGE_SIZE);
@@ -151,7 +151,6 @@ static NTSTATUS
 XenVbd_Disconnect(PVOID DeviceExtension, BOOLEAN suspend) {
   NTSTATUS status;
   PXENVBD_DEVICE_DATA xvdd = (PXENVBD_DEVICE_DATA)DeviceExtension;
-  PFN_NUMBER pfn;
 
   if (xvdd->device_state == DEVICE_STATE_INACTIVE) {
     /* state stays INACTIVE */
@@ -177,7 +176,6 @@ XenVbd_Disconnect(PVOID DeviceExtension, BOOLEAN suspend) {
     KeWaitForSingleObject(&xvdd->backend_event, Executive, KernelMode, FALSE, NULL);
   }
   XnUnbindEvent(xvdd->handle, xvdd->event_channel);
-  pfn = (PFN_NUMBER)MmGetPhysicalAddress(xvdd->sring).QuadPart >> PAGE_SHIFT;
   XnEndAccess(xvdd->handle, xvdd->sring_gref, FALSE, xvdd->grant_tag);
   ExFreePoolWithTag(xvdd->sring, XENVBD_POOL_TAG);
 
