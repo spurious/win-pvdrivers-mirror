@@ -75,7 +75,7 @@ XenPci_GetBackendDetails(WDFDEVICE device)
   res = XenBus_Read(xpdd, XBT_NIL, path, &value);
   if (res)
   {
-    KdPrint((__DRIVER_NAME "    Failed to read backend path\n"));
+    FUNCTION_MSG("Failed to read backend path\n");
     XenPci_FreeMem(res);
     return STATUS_UNSUCCESSFUL;
   }
@@ -87,7 +87,7 @@ XenPci_GetBackendDetails(WDFDEVICE device)
     "%s/backend-id", xppdd->path);
   res = XenBus_Read(xpdd, XBT_NIL, path, &value);
   if (res) {
-    KdPrint((__DRIVER_NAME "    Failed to read backend id\n"));
+    FUNCTION_MSG("Failed to read backend id\n");
     XenPci_FreeMem(res);
     return STATUS_UNSUCCESSFUL;
   }
@@ -150,33 +150,33 @@ XenPciPdo_EvtDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previous_sta
   CHAR path[128];
   
   FUNCTION_ENTER();
-  KdPrint((__DRIVER_NAME "     path = %s\n", xppdd->path));
+  FUNCTION_MSG("path = %s\n", xppdd->path);
 
   switch (previous_state) {
   case WdfPowerDeviceD0:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD1\n"));
+    FUNCTION_MSG("WdfPowerDeviceD1\n");
     break;
   case WdfPowerDeviceD1:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD1\n"));
+    FUNCTION_MSG("WdfPowerDeviceD1\n");
     break;
   case WdfPowerDeviceD2:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD2\n"));
+    FUNCTION_MSG("WdfPowerDeviceD2\n");
     break;
   case WdfPowerDeviceD3:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD3\n"));
+    FUNCTION_MSG("WdfPowerDeviceD3\n");
     if (xppdd->hiber_usage_kludge) {
-      KdPrint((__DRIVER_NAME "     (but really WdfPowerDevicePrepareForHibernation)\n"));
+      FUNCTION_MSG("(but really WdfPowerDevicePrepareForHibernation)\n");
       previous_state = WdfPowerDevicePrepareForHibernation;
     }
     break;
   case WdfPowerDeviceD3Final:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD3Final\n"));
+    FUNCTION_MSG("WdfPowerDeviceD3Final\n");
     break;
   case WdfPowerDevicePrepareForHibernation:
-    KdPrint((__DRIVER_NAME "     WdfPowerDevicePrepareForHibernation\n"));
+    FUNCTION_MSG("WdfPowerDevicePrepareForHibernation\n");
     break;  
   default:
-    KdPrint((__DRIVER_NAME "     Unknown WdfPowerDevice state %d\n", previous_state));
+    FUNCTION_MSG("Unknown WdfPowerDevice state %d\n", previous_state);
     break;  
   }
 
@@ -217,39 +217,39 @@ XenPciPdo_EvtDeviceD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE target_state)
   UNREFERENCED_PARAMETER(target_state);
   
   FUNCTION_ENTER();
-  KdPrint((__DRIVER_NAME "     path = %s\n", xppdd->path));
+  FUNCTION_MSG("path = %s\n", xppdd->path);
   
   switch (target_state) {
   case WdfPowerDeviceD0:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD1\n"));
+    FUNCTION_MSG("WdfPowerDeviceD1\n");
     break;
   case WdfPowerDeviceD1:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD1\n"));
+    FUNCTION_MSG("WdfPowerDeviceD1\n");
     break;
   case WdfPowerDeviceD2:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD2\n"));
+    FUNCTION_MSG("WdfPowerDeviceD2\n");
     break;
   case WdfPowerDeviceD3:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD3\n"));
+    FUNCTION_MSG("WdfPowerDeviceD3\n");
     if (xppdd->hiber_usage_kludge) {
-      KdPrint((__DRIVER_NAME "     (but really WdfPowerDevicePrepareForHibernation)\n"));
+      FUNCTION_MSG("(but really WdfPowerDevicePrepareForHibernation)\n");
       target_state = WdfPowerDevicePrepareForHibernation;
     }
     break;
   case WdfPowerDeviceD3Final:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD3Final\n"));
+    FUNCTION_MSG("WdfPowerDeviceD3Final\n");
     break;
   case WdfPowerDevicePrepareForHibernation:
-    KdPrint((__DRIVER_NAME "     WdfPowerDevicePrepareForHibernation\n"));
+    FUNCTION_MSG("WdfPowerDevicePrepareForHibernation\n");
     break;  
   default:
-    KdPrint((__DRIVER_NAME "     Unknown WdfPowerDevice state %d\n", target_state));
+    FUNCTION_MSG("Unknown WdfPowerDevice state %d\n", target_state);
     break;  
   }
   
   if (target_state == WdfPowerDevicePrepareForHibernation)
   {
-    KdPrint((__DRIVER_NAME "     not powering down as we are hibernating\n"));
+    FUNCTION_MSG("not powering down as we are hibernating\n");
     // should we set the backend state here so it's correct on resume???
   }
   
@@ -272,21 +272,21 @@ XenPciPdo_EvtDeviceUsageNotification(WDFDEVICE device, WDF_SPECIAL_FILE_TYPE not
 
   FUNCTION_ENTER();
   
-  KdPrint((__DRIVER_NAME "     path = %s\n", xppdd->path));
+  FUNCTION_MSG("path = %s\n", xppdd->path);
   switch (notification_type)
   {
   case WdfSpecialFilePaging:
-    KdPrint((__DRIVER_NAME "     notification_type = Paging, flag = %d\n", is_in_notification_path));
+    FUNCTION_MSG("notification_type = Paging, flag = %d\n", is_in_notification_path);
     break;
   case WdfSpecialFileHibernation:
     xppdd->hiber_usage_kludge = is_in_notification_path;
-    KdPrint((__DRIVER_NAME "     notification_type = Hibernation, flag = %d\n", is_in_notification_path));
+    FUNCTION_MSG("notification_type = Hibernation, flag = %d\n", is_in_notification_path);
     break;
   case WdfSpecialFileDump:
-    KdPrint((__DRIVER_NAME "     notification_type = Dump, flag = %d\n", is_in_notification_path));
+    FUNCTION_MSG("notification_type = Dump, flag = %d\n", is_in_notification_path);
     break;
   default:
-    KdPrint((__DRIVER_NAME "     notification_type = %d, flag = %d\n", notification_type, is_in_notification_path));
+    FUNCTION_MSG("notification_type = %d, flag = %d\n", notification_type, is_in_notification_path);
     break;
   }
 
@@ -307,7 +307,7 @@ XenPci_EvtDevicePnpStateChange(WDFDEVICE device, PCWDF_DEVICE_PNP_NOTIFICATION_D
   {
     PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
     
-    KdPrint((__DRIVER_NAME "     Eject failed, doing surprise removal\n"));
+    FUNCTION_MSG("Eject failed, doing surprise removal\n");
     xppdd->do_not_enumerate = TRUE;
     XenPci_EvtChildListScanForChildren(xpdd->child_list);
   }
@@ -345,8 +345,8 @@ XenPci_EvtChildListCreateDevice(WDFCHILDLIST child_list,
   child_pnp_power_callbacks.EvtDeviceUsageNotification = XenPciPdo_EvtDeviceUsageNotification;
   WdfDeviceInitSetPnpPowerEventCallbacks(child_init, &child_pnp_power_callbacks);
 
-  KdPrint((__DRIVER_NAME "     device = '%s', index = '%d', path = '%s'\n",
-    identification->device, identification->index, identification->path));
+  FUNCTION_MSG("device = '%s', index = '%d', path = '%s'\n",
+    identification->device, identification->index, identification->path);
   
   //status = WdfDeviceInitAssignWdmIrpPreprocessCallback(child_init, XenPciPdo_EvtDeviceWdmIrpPreprocess_START_DEVICE,
   //  IRP_MJ_PNP, pnp_minor_functions, ARRAY_SIZE(pnp_minor_functions));
