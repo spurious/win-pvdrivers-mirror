@@ -58,6 +58,7 @@ typedef struct {
   WDFIOTARGET wdf_target;
   WDFDPC dpc;
   WDFQUEUE io_queue;
+  BOOLEAN hibernate_flag;
   
   XENVBD_DEVICE_DATA xvdd;
 } XENVBD_FILTER_DATA, *PXENVBD_FILTER_DATA;

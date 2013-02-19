@@ -77,7 +77,6 @@ XenVbd_NotificationNextLuRequest(PXENVBD_DEVICE_DATA xvdd, UCHAR PathId, UCHAR T
 /* called in non-dump mode */
 static ULONG
 XenVbd_HwScsiFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInformation, PCHAR ArgumentString, PPORT_CONFIGURATION_INFORMATION ConfigInfo, PBOOLEAN Again) {
-  //NTSTATUS status;
   PXENVBD_SCSIPORT_DATA xvsd = (PXENVBD_SCSIPORT_DATA)DeviceExtension;
   PXENVBD_DEVICE_DATA xvdd;
   PACCESS_RANGE access_range;
@@ -87,16 +86,9 @@ XenVbd_HwScsiFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInform
   UNREFERENCED_PARAMETER(ArgumentString);
 
   FUNCTION_ENTER(); 
-  KdPrint((__DRIVER_NAME "     IRQL = %d\n", KeGetCurrentIrql()));
-  KdPrint((__DRIVER_NAME "     xvsd = %p\n", xvsd));
+  FUNCTION_MSG("IRQL = %d\n", KeGetCurrentIrql());
+  FUNCTION_MSG("xvsd = %p\n", xvsd);
 
-  if (dump_mode) {
-    if (xvsd->xvdd->device_state != DEVICE_STATE_ACTIVE) {
-      /* if we are not connected to the ring when we start dump mode then there is nothing we can do */
-      FUNCTION_MSG("Cannot connect backend in dump mode - state = %d\n", xvsd->xvdd->device_state);
-      return SP_RETURN_ERROR;
-    }
-  }
   if (ConfigInfo->NumberOfAccessRanges != 1) {
     FUNCTION_MSG("NumberOfAccessRanges wrong\n");
     FUNCTION_EXIT();
@@ -107,19 +99,36 @@ XenVbd_HwScsiFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInform
     FUNCTION_EXIT();
     return SP_RETURN_BAD_CONFIG;
   }
-  RtlZeroMemory(xvsd, sizeof(XENVBD_SCSIPORT_DATA));
+  RtlZeroMemory(xvsd, FIELD_OFFSET(XENVBD_SCSIPORT_DATA, aligned_buffer_data));
 
   access_range = &((*(ConfigInfo->AccessRanges))[0]);
-  xvdd = (PXENVBD_DEVICE_DATA)(ULONG_PTR)access_range->RangeStart.QuadPart;
-  xvsd->xvdd = xvdd;
-  xvdd->xvsd = xvsd;
+
+  if (!dump_mode) {
+    xvdd = (PXENVBD_DEVICE_DATA)(ULONG_PTR)access_range->RangeStart.QuadPart;
+    xvsd->xvdd = xvdd;
+    xvdd->xvsd = xvsd;
+    xvdd->aligned_buffer = (PVOID)((ULONG_PTR)((PUCHAR)xvsd->aligned_buffer_data + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1));
+  } else {
+    /* make a copy of xvdd and use that copy */
+    xvdd = (PXENVBD_DEVICE_DATA)xvsd->aligned_buffer_data;
+    memcpy(xvdd, (PVOID)(ULONG_PTR)access_range->RangeStart.QuadPart, sizeof(XENVBD_DEVICE_DATA));
+    /* make sure original xvdd is set to DISCONNECTED or resume will not work */
+    ((PXENVBD_DEVICE_DATA)(ULONG_PTR)access_range->RangeStart.QuadPart)->device_state = DEVICE_STATE_DISCONNECTED;
+    xvsd->xvdd = xvdd;
+    xvdd->xvsd = xvsd;
+    xvdd->aligned_buffer = (PVOID)((ULONG_PTR)((PUCHAR)xvsd->aligned_buffer_data + sizeof(XENVBD_DEVICE_DATA) + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1));
+    if (xvsd->xvdd->device_state != DEVICE_STATE_ACTIVE) {
+      /* if we are not connected to the ring when we start dump mode then there is nothing we can do */
+      FUNCTION_MSG("Cannot connect backend in dump mode - state = %d\n", xvsd->xvdd->device_state);
+      return SP_RETURN_ERROR;
+    }
+  }
+  FUNCTION_MSG("aligned_buffer_data = %p\n", xvsd->aligned_buffer_data);
+  FUNCTION_MSG("aligned_buffer = %p\n", xvdd->aligned_buffer);
 
   InitializeListHead(&xvdd->srb_list);
   xvdd->aligned_buffer_in_use = FALSE;
   /* align the buffer to PAGE_SIZE */
-  xvdd->aligned_buffer = (PVOID)((ULONG_PTR)((PUCHAR)xvsd->aligned_buffer_data + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1));
-  KdPrint((__DRIVER_NAME "     aligned_buffer_data = %p\n", xvsd->aligned_buffer_data));
-  KdPrint((__DRIVER_NAME "     aligned_buffer = %p\n", xvdd->aligned_buffer));
 
   ConfigInfo->MaximumTransferLength = 4 * 1024 * 1024; //BLKIF_MAX_SEGMENTS_PER_REQUEST * PAGE_SIZE;
   ConfigInfo->NumberOfPhysicalBreaks = ConfigInfo->MaximumTransferLength >> PAGE_SHIFT; //BLKIF_MAX_SEGMENTS_PER_REQUEST - 1;
@@ -130,7 +139,6 @@ XenVbd_HwScsiFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInform
   } else {
     xvdd->aligned_buffer_size = DUMP_MODE_UNALIGNED_PAGES * PAGE_SIZE;
   }
-  //status = XenVbd_Connect(DeviceExtension, FALSE);
 
   FUNCTION_MSG("MultipleRequestPerLu = %d\n", ConfigInfo->MultipleRequestPerLu);
   FUNCTION_MSG("TaggedQueuing = %d\n", ConfigInfo->TaggedQueuing);
@@ -165,8 +173,8 @@ XenVbd_HwScsiInitialize(PVOID DeviceExtension) {
   ULONG i;
   
   FUNCTION_ENTER();
-  KdPrint((__DRIVER_NAME "     IRQL = %d\n", KeGetCurrentIrql()));
-  KdPrint((__DRIVER_NAME "     dump_mode = %d\n", dump_mode));
+  FUNCTION_MSG("IRQL = %d\n", KeGetCurrentIrql());
+  FUNCTION_MSG("dump_mode = %d\n", dump_mode);
   
   xvdd->shadow_free = 0;
   memset(xvdd->shadows, 0, sizeof(blkif_shadow_t) * SHADOW_ENTRIES);
@@ -278,52 +286,50 @@ XenVbd_HwScsiStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb) {
 }
 
 static SCSI_ADAPTER_CONTROL_STATUS
-XenVbd_HwScsiAdapterControl(PVOID DeviceExtension, SCSI_ADAPTER_CONTROL_TYPE ControlType, PVOID Parameters)
-{
+XenVbd_HwScsiAdapterControl(PVOID DeviceExtension, SCSI_ADAPTER_CONTROL_TYPE ControlType, PVOID Parameters) {
   PXENVBD_SCSIPORT_DATA xvsd = DeviceExtension;
   PXENVBD_DEVICE_DATA xvdd = (PXENVBD_DEVICE_DATA)xvsd->xvdd;
   SCSI_ADAPTER_CONTROL_STATUS Status = ScsiAdapterControlSuccess;
   PSCSI_SUPPORTED_CONTROL_TYPE_LIST SupportedControlTypeList;
 
   FUNCTION_ENTER();
-  KdPrint((__DRIVER_NAME "     IRQL = %d\n", KeGetCurrentIrql()));
-  KdPrint((__DRIVER_NAME "     xvsd = %p\n", xvsd));
+  FUNCTION_MSG("IRQL = %d\n", KeGetCurrentIrql());
+  FUNCTION_MSG("xvsd = %p\n", xvsd);
 
-  switch (ControlType)
-  {
+  switch (ControlType) {
   case ScsiQuerySupportedControlTypes:
     SupportedControlTypeList = (PSCSI_SUPPORTED_CONTROL_TYPE_LIST)Parameters;
-    KdPrint((__DRIVER_NAME "     ScsiQuerySupportedControlTypes (Max = %d)\n", SupportedControlTypeList->MaxControlType));
+    FUNCTION_MSG("ScsiQuerySupportedControlTypes (Max = %d)\n", SupportedControlTypeList->MaxControlType);
     SupportedControlTypeList->SupportedTypeList[ScsiQuerySupportedControlTypes] = TRUE;
     SupportedControlTypeList->SupportedTypeList[ScsiStopAdapter] = TRUE;
     SupportedControlTypeList->SupportedTypeList[ScsiRestartAdapter] = TRUE;
     break;
   case ScsiStopAdapter:
-    KdPrint((__DRIVER_NAME "     ScsiStopAdapter\n"));
+    FUNCTION_MSG("ScsiStopAdapter\n");
     if (xvdd->device_state == DEVICE_STATE_INACTIVE) {
-      KdPrint((__DRIVER_NAME "     inactive - nothing to do\n"));
+      FUNCTION_MSG("inactive - nothing to do\n");
       break;
     }
-    NT_ASSERT(IsListEmpty(&xvdd->srb_list));
-    NT_ASSERT(xvdd->shadow_free == SHADOW_ENTRIES);
+    XN_ASSERT(IsListEmpty(&xvdd->srb_list));
+    XN_ASSERT(xvdd->shadow_free == SHADOW_ENTRIES);
     break;
   case ScsiRestartAdapter:
-    KdPrint((__DRIVER_NAME "     ScsiRestartAdapter\n"));
+    FUNCTION_MSG("ScsiRestartAdapter\n");
     if (xvdd->device_state == DEVICE_STATE_INACTIVE) {
-      KdPrint((__DRIVER_NAME "     inactive - nothing to do\n"));
+      FUNCTION_MSG("inactive - nothing to do\n");
       break;
     }
     /* increase the tag every time we stop/start to track where the gref's came from */
     xvdd->grant_tag++;
     break;
   case ScsiSetBootConfig:
-    KdPrint((__DRIVER_NAME "     ScsiSetBootConfig\n"));
+    FUNCTION_MSG("ScsiSetBootConfig\n");
     break;
   case ScsiSetRunningConfig:
-    KdPrint((__DRIVER_NAME "     ScsiSetRunningConfig\n"));
+    FUNCTION_MSG("ScsiSetRunningConfig\n");
     break;
   default:
-    KdPrint((__DRIVER_NAME "     UNKNOWN\n"));
+    FUNCTION_MSG("UNKNOWN\n");
     break;
   }
 
@@ -339,13 +345,13 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
   
   /* RegistryPath == NULL when we are invoked as a crash dump driver */
   if (!RegistryPath) {
-    KdPrint((__DRIVER_NAME "     IRQL = %d (if you can read this we aren't in dump mode)\n", KeGetCurrentIrql()));
     dump_mode = TRUE;
+    XnPrintDump();
   }
 
   FUNCTION_ENTER();
-  KdPrint((__DRIVER_NAME "     IRQL = %d\n", KeGetCurrentIrql()));
-  KdPrint((__DRIVER_NAME "     DriverObject = %p, RegistryPath = %p\n", DriverObject, RegistryPath));
+  FUNCTION_MSG("IRQL = %d\n", KeGetCurrentIrql());
+  FUNCTION_MSG("DriverObject = %p, RegistryPath = %p\n", DriverObject, RegistryPath);
   
   RtlZeroMemory(&HwInitializationData, sizeof(HW_INITIALIZATION_DATA));
   HwInitializationData.HwInitializationDataSize = sizeof(HW_INITIALIZATION_DATA);
@@ -367,7 +373,7 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
     HwInitializationData.DeviceExtensionSize = FIELD_OFFSET(XENVBD_SCSIPORT_DATA, aligned_buffer_data) + UNALIGNED_BUFFER_DATA_SIZE;
   } else {
     HwInitializationData.HwInterrupt = XenVbd_HwScsiInterrupt;
-    HwInitializationData.DeviceExtensionSize = FIELD_OFFSET(XENVBD_SCSIPORT_DATA, aligned_buffer_data) + UNALIGNED_BUFFER_DATA_SIZE_DUMP_MODE;
+    HwInitializationData.DeviceExtensionSize = FIELD_OFFSET(XENVBD_SCSIPORT_DATA, aligned_buffer_data) + sizeof(XENVBD_DEVICE_DATA) + UNALIGNED_BUFFER_DATA_SIZE_DUMP_MODE;
   }
   status = ScsiPortInitialize(DriverObject, RegistryPath, &HwInitializationData, NULL);
   

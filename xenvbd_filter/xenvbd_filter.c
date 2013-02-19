@@ -29,6 +29,7 @@ static EVT_WDF_REQUEST_COMPLETION_ROUTINE XenVbd_SendRequestComplete;
 static EVT_WDF_DEVICE_D0_ENTRY XenVbd_EvtDeviceD0Entry;
 static EVT_WDF_DEVICE_D0_EXIT XenVbd_EvtDeviceD0Exit;
 static EVT_WDFDEVICE_WDM_IRP_PREPROCESS XenVbd_EvtDeviceWdmIrpPreprocess_START_DEVICE;
+static EVT_WDFDEVICE_WDM_IRP_PREPROCESS XenVbd_EvtDeviceWdmIrpPreprocess_SET_POWER;
 static EVT_WDF_DPC XenVbd_EvtDpcEvent;
 static IO_COMPLETION_ROUTINE XenVbd_IoCompletion_START_DEVICE;
 
@@ -249,11 +250,39 @@ XenVbd_EvtDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previous_state)
 static NTSTATUS
 XenVbd_EvtDeviceD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE target_state) {
   PXENVBD_FILTER_DATA xvfd = GetXvfd(device);
-  NTSTATUS status;
-  // if hibernate then same as suspend
-  UNREFERENCED_PARAMETER(target_state);
+  NTSTATUS status = STATUS_SUCCESS;
+
   FUNCTION_ENTER();
-  status = XenVbd_Disconnect(&xvfd->xvdd, FALSE);
+  switch (target_state) {
+  case WdfPowerDeviceD0:
+    FUNCTION_MSG("WdfPowerDeviceD1\n");
+    break;
+  case WdfPowerDeviceD1:
+    FUNCTION_MSG("WdfPowerDeviceD1\n");
+    break;
+  case WdfPowerDeviceD2:
+    FUNCTION_MSG("WdfPowerDeviceD2\n");
+    break;
+  case WdfPowerDeviceD3:
+    FUNCTION_MSG("WdfPowerDeviceD3\n");
+    if (xvfd->hibernate_flag) {
+      FUNCTION_MSG("(but really WdfPowerDevicePrepareForHibernation)\n");
+      target_state = WdfPowerDevicePrepareForHibernation;
+    }
+    break;
+  case WdfPowerDeviceD3Final:
+    FUNCTION_MSG("WdfPowerDeviceD3Final\n");
+    break;
+  case WdfPowerDevicePrepareForHibernation:
+    FUNCTION_MSG("WdfPowerDevicePrepareForHibernation\n");
+    break;  
+  default:
+    FUNCTION_MSG("Unknown WdfPowerDevice state %d\n", target_state);
+    break;  
+  }
+  if (target_state != WdfPowerDevicePrepareForHibernation) {
+    status = XenVbd_Disconnect(&xvfd->xvdd, FALSE);
+  }
   FUNCTION_EXIT();
   return status;
 }
@@ -318,6 +347,25 @@ XenVbd_EvtDeviceWdmIrpPreprocess_START_DEVICE(WDFDEVICE device, PIRP irp) {
   return WdfDeviceWdmDispatchPreprocessedIrp(device, irp);
 }
 
+/* scsiport doesn't process SET_POWER correctly so we have to fudge detection of hibernate */
+static NTSTATUS
+XenVbd_EvtDeviceWdmIrpPreprocess_SET_POWER(WDFDEVICE device, PIRP irp) {
+  PXENVBD_FILTER_DATA xvfd = GetXvfd(device);
+  PIO_STACK_LOCATION stack;
+  
+  FUNCTION_ENTER();
+  stack = IoGetCurrentIrpStackLocation(irp);
+  if (stack->Parameters.Power.Type == DevicePowerState && stack->Parameters.Power.State.DeviceState == PowerDeviceD3 && stack->Parameters.Power.ShutdownType == PowerActionHibernate) {
+    FUNCTION_MSG("Going to hibernate\n");
+    xvfd->hibernate_flag = TRUE;
+  } else {
+    xvfd->hibernate_flag = FALSE;
+  }
+  IoSkipCurrentIrpStackLocation(irp);
+  FUNCTION_EXIT();
+  return WdfDeviceWdmDispatchPreprocessedIrp(device, irp);
+}
+
 static NTSTATUS
 XenVbd_EvtDeviceAdd(WDFDRIVER driver, PWDFDEVICE_INIT device_init) {
   PXENVBD_FILTER_DATA xvfd;
@@ -328,6 +376,7 @@ XenVbd_EvtDeviceAdd(WDFDRIVER driver, PWDFDEVICE_INIT device_init) {
   WDF_DPC_CONFIG dpc_config;
   WDF_OBJECT_ATTRIBUTES oa;
   UCHAR pnp_minor_functions[] = { IRP_MN_START_DEVICE };
+  UCHAR power_minor_functions[] = { IRP_MN_SET_POWER };
   
   UNREFERENCED_PARAMETER(driver);
 
@@ -344,6 +393,12 @@ XenVbd_EvtDeviceAdd(WDFDRIVER driver, PWDFDEVICE_INIT device_init) {
 
   status = WdfDeviceInitAssignWdmIrpPreprocessCallback(device_init, XenVbd_EvtDeviceWdmIrpPreprocess_START_DEVICE,
     IRP_MJ_PNP, pnp_minor_functions, ARRAY_SIZE(pnp_minor_functions));
+  if (!NT_SUCCESS(status)) {
+    return status;
+  }
+
+  status = WdfDeviceInitAssignWdmIrpPreprocessCallback(device_init, XenVbd_EvtDeviceWdmIrpPreprocess_SET_POWER,
+    IRP_MJ_POWER, power_minor_functions, ARRAY_SIZE(power_minor_functions));
   if (!NT_SUCCESS(status)) {
     return status;
   }
