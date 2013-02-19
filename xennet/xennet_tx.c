@@ -24,7 +24,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 static USHORT
 get_id_from_freelist(struct xennet_info *xi)
 {
-  NT_ASSERT(xi->tx_id_free);
+  XN_ASSERT(xi->tx_id_free);
   xi->tx_id_free--;
 
   return xi->tx_id_list[xi->tx_id_free];
@@ -47,15 +47,15 @@ XenNet_PutCbOnRing(struct xennet_info *xi, PVOID coalesce_buf, ULONG length, gra
   xi->tx_ring.req_prod_pvt++;
   xi->tx_ring_free--;
   tx->id = get_id_from_freelist(xi);
-  NT_ASSERT(xi->tx_shadows[tx->id].gref == INVALID_GRANT_REF);
-  NT_ASSERT(!xi->tx_shadows[tx->id].cb);
+  XN_ASSERT(xi->tx_shadows[tx->id].gref == INVALID_GRANT_REF);
+  XN_ASSERT(!xi->tx_shadows[tx->id].cb);
   xi->tx_shadows[tx->id].cb = coalesce_buf;
   tx->gref = XnGrantAccess(xi->handle, (ULONG)(MmGetPhysicalAddress(coalesce_buf).QuadPart >> PAGE_SHIFT), FALSE, gref, (ULONG)'XNTX');
   xi->tx_shadows[tx->id].gref = tx->gref;
   tx->offset = 0;
   tx->size = (USHORT)length;
-  NT_ASSERT(tx->offset + tx->size <= PAGE_SIZE);
-  NT_ASSERT(tx->size);
+  XN_ASSERT(tx->offset + tx->size <= PAGE_SIZE);
+  XN_ASSERT(tx->size);
   return tx;
 }
 
@@ -228,7 +228,7 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER packet) {
 
   /* (A) */
   tx0 = XenNet_PutCbOnRing(xi, coalesce_buf, pi.header_length, gref);
-  NT_ASSERT(tx0); /* this will never happen */
+  XN_ASSERT(tx0); /* this will never happen */
   tx0->flags = flags;
   tx_length += pi.header_length;
 
@@ -246,7 +246,7 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER packet) {
 
   /* (B) */
   if (xen_gso) {
-    NT_ASSERT(flags & NETTXF_extra_info);
+    XN_ASSERT(flags & NETTXF_extra_info);
     ei = (struct netif_extra_info *)RING_GET_REQUEST(&xi->tx_ring, xi->tx_ring.req_prod_pvt);
     //KdPrint((__DRIVER_NAME "     pos = %d\n", xi->tx_ring.req_prod_pvt));
     xi->tx_ring.req_prod_pvt++;
@@ -259,7 +259,7 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER packet) {
     ei->u.gso.features = 0;
   }
 
-  NT_ASSERT(xi->current_sg_supported || !remaining);
+  XN_ASSERT(xi->current_sg_supported || !remaining);
   
   /* (C) - only if data is remaining */
   coalesce_buf = NULL;
@@ -267,7 +267,7 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER packet) {
     ULONG length;
     PFN_NUMBER pfn;
 
-    NT_ASSERT(pi.curr_mdl);
+    XN_ASSERT(pi.curr_mdl);
     if (coalesce_required) {
       PVOID va;
       if (!coalesce_buf) {
@@ -306,7 +306,7 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER packet) {
     if (coalesce_buf) {
       if (remaining) {
         txN = XenNet_PutCbOnRing(xi, coalesce_buf, min(PAGE_SIZE, remaining), gref);
-        NT_ASSERT(txN);
+        XN_ASSERT(txN);
         coalesce_buf = NULL;
         tx_length += min(PAGE_SIZE, remaining);
         remaining -= min(PAGE_SIZE, remaining);
@@ -323,18 +323,18 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER packet) {
       xi->tx_ring.req_prod_pvt++;
       xi->tx_ring_free--;
       txN->id = get_id_from_freelist(xi);
-      NT_ASSERT(!xi->tx_shadows[txN->id].cb);
+      XN_ASSERT(!xi->tx_shadows[txN->id].cb);
       offset = MmGetMdlByteOffset(pi.curr_mdl) + pi.curr_mdl_offset;
       pfn = MmGetMdlPfnArray(pi.curr_mdl)[offset >> PAGE_SHIFT];
       txN->offset = (USHORT)offset & (PAGE_SIZE - 1);
       txN->gref = XnGrantAccess(xi->handle, (ULONG)pfn, FALSE, gref, (ULONG)'XNTX');
-      NT_ASSERT(xi->tx_shadows[txN->id].gref == INVALID_GRANT_REF);
+      XN_ASSERT(xi->tx_shadows[txN->id].gref == INVALID_GRANT_REF);
       xi->tx_shadows[txN->id].gref = txN->gref;
       //ASSERT(sg->Elements[sg_element].Length > sg_offset);
       txN->size = (USHORT)length;
-      NT_ASSERT(txN->offset + txN->size <= PAGE_SIZE);
-      NT_ASSERT(txN->size);
-      NT_ASSERT(txN->gref != INVALID_GRANT_REF);
+      XN_ASSERT(txN->offset + txN->size <= PAGE_SIZE);
+      XN_ASSERT(txN->size);
+      XN_ASSERT(txN->gref != INVALID_GRANT_REF);
       remaining -= length;
       tx_length += length;
     }
@@ -343,8 +343,8 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER packet) {
     XenNet_EatData(&pi, length);
   }
   txN->flags &= ~NETTXF_more_data;
-  NT_ASSERT(tx0->size == pi.total_length);
-  NT_ASSERT(!xi->tx_shadows[txN->id].packet);
+  XN_ASSERT(tx0->size == pi.total_length);
+  XN_ASSERT(!xi->tx_shadows[txN->id].packet);
   xi->tx_shadows[txN->id].packet = packet;
 
   #if NTDDI_VERSION < NTDDI_VISTA
@@ -414,7 +414,7 @@ XenNet_TxBufferGC(struct xennet_info *xi, BOOLEAN dont_set_event) {
   #endif
   ULONG tx_packets = 0;
 
-  NT_ASSERT(KeGetCurrentIrql() == DISPATCH_LEVEL);
+  XN_ASSERT(KeGetCurrentIrql() == DISPATCH_LEVEL);
 
   KeAcquireSpinLockAtDpcLevel(&xi->tx_lock);
 
@@ -570,7 +570,7 @@ XenNet_SendPackets(NDIS_HANDLE MiniportAdapterContext, PPNDIS_PACKET PacketArray
 
   for (i = 0; i < NumberOfPackets; i++) {
     packet = PacketArray[i];
-    ASSERT(packet);
+    XN_ASSERT(packet);
     entry = &PACKET_LIST_ENTRY(packet);
     InsertTailList(&xi->tx_waiting_pkt_list, entry);
   }

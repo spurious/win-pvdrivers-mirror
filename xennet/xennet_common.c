@@ -73,7 +73,7 @@ XenNet_BuildHeader(packet_info_t *pi, PUCHAR header, ULONG new_header_size)
   while (bytes_remaining && pi->curr_mdl) {
     ULONG copy_size;
     
-    ASSERT(pi->curr_mdl);
+    XN_ASSERT(pi->curr_mdl);
     //KdPrint((__DRIVER_NAME "     B bytes_remaining = %d, pi->curr_mdl = %p\n", bytes_remaining, pi->curr_mdl));
     if (MmGetMdlByteCount(pi->curr_mdl)) {
       PUCHAR src_addr;
@@ -116,7 +116,7 @@ XenNet_ParsePacketHeader(packet_info_t *pi, PUCHAR alt_buffer, ULONG min_header_
 {
   //FUNCTION_ENTER();
 
-  ASSERT(pi->first_mdl);
+  XN_ASSERT(pi->first_mdl);
   
   #if NTDDI_VERSION < NTDDI_VISTA
   NdisQueryBufferSafe(pi->first_mdl, (PVOID)&pi->first_mdl_virtual, &pi->first_mdl_length, NormalPagePriority);
@@ -245,8 +245,8 @@ XenNet_CheckIpHeaderSum(PUCHAR header, USHORT ip4_header_length) {
   ULONG csum = 0;
   USHORT i;
 
-  ASSERT(ip4_header_length > 12);
-  ASSERT(!(ip4_header_length & 1));
+  XN_ASSERT(ip4_header_length > 12);
+  XN_ASSERT(!(ip4_header_length & 1));
 
   for (i = 0; i < ip4_header_length; i += 2) {
     csum += GET_NET_PUSHORT(&header[XN_HDR_SIZE + i]);
@@ -261,8 +261,8 @@ XenNet_SumIpHeader(PUCHAR header, USHORT ip4_header_length) {
   ULONG csum = 0;
   USHORT i;
 
-  ASSERT(ip4_header_length > 12);
-  ASSERT(!(ip4_header_length & 1));
+  XN_ASSERT(ip4_header_length > 12);
+  XN_ASSERT(!(ip4_header_length & 1));
 
   header[XN_HDR_SIZE + 10] = 0;
   header[XN_HDR_SIZE + 11] = 0;
