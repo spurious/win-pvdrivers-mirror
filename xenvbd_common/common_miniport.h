@@ -40,10 +40,9 @@ ULONGLONG parse_numeric_string(PCHAR string) {
 
 /* called with StartIoLock held */
 static blkif_shadow_t *
-get_shadow_from_freelist(PXENVBD_DEVICE_DATA xvdd)
-{
+get_shadow_from_freelist(PXENVBD_DEVICE_DATA xvdd) {
   if (xvdd->shadow_free == 0) {
-    KdPrint((__DRIVER_NAME "     No more shadow entries\n"));
+    FUNCTION_MSG("No more shadow entries\n");
     return NULL;
   }
   xvdd->shadow_free--;
@@ -118,7 +117,7 @@ decode_cdb_sector(PSCSI_REQUEST_BLOCK srb)
            | ((ULONGLONG)(UCHAR)srb->Cdb[4] << 40) | ((ULONGLONG)(UCHAR)srb->Cdb[5] << 32)
            | ((ULONGLONG)(UCHAR)srb->Cdb[6] << 24) | ((ULONGLONG)(UCHAR)srb->Cdb[7] << 16)
            | ((ULONGLONG)(UCHAR)srb->Cdb[8] << 8) | ((ULONGLONG)(UCHAR)srb->Cdb[9]);
-    //KdPrint((__DRIVER_NAME "     sector_number = %d (high) %d (low)\n", (ULONG)(sector >> 32), (ULONG)sector));
+    //FUNCTION_MSG("sector_number = %d (high) %d (low)\n", (ULONG)(sector >> 32), (ULONG)sector);
     break;
   default:
     sector = 0;
@@ -182,8 +181,11 @@ XenVbd_HandleEvent(PXENVBD_DEVICE_DATA xvdd) {
   blkif_shadow_t *shadow;
   srb_list_entry_t *srb_entry;
 
-  //if (dump_mode)
-  //FUNCTION_ENTER();
+  if (xvdd->device_state != DEVICE_STATE_ACTIVE && xvdd->device_state != DEVICE_STATE_DISCONNECTING) {
+    /* if we aren't active (eg just restored from hibernate) then we still want to process non-scsi srb's */
+    XenVbd_ProcessSrbList(xvdd);
+    return;
+  }
 
   while (more_to_do) {
     rp = xvdd->ring.sring->rsp_prod;
@@ -202,22 +204,22 @@ XenVbd_HandleEvent(PXENVBD_DEVICE_DATA xvdd) {
         FUNCTION_MSG("discarding stale (non-dump-mode) shadow\n");
       } else {
         srb = shadow->srb;
-        NT_ASSERT(srb);
+        XN_ASSERT(srb);
         srb_entry = srb->SrbExtension;
-        NT_ASSERT(srb_entry);
+        XN_ASSERT(srb_entry);
         /* a few errors occur in dump mode because Xen refuses to allow us to map pages we are using for other stuff. Just ignore them */
         if (rep->status == BLKIF_RSP_OKAY || (dump_mode &&  dump_mode_errors++ < DUMP_MODE_ERROR_LIMIT)) {
           srb->SrbStatus = SRB_STATUS_SUCCESS;
         } else {
-          KdPrint((__DRIVER_NAME "     Xen Operation returned error\n"));
+          FUNCTION_MSG("Xen Operation returned error\n");
           if (decode_cdb_is_read(srb))
-            KdPrint((__DRIVER_NAME "     Operation = Read\n"));
+            FUNCTION_MSG("Operation = Read\n");
           else
-            KdPrint((__DRIVER_NAME "     Operation = Write\n"));
+            FUNCTION_MSG("Operation = Write\n");
           srb_entry->error = TRUE;
         }
         if (shadow->aligned_buffer_in_use) {
-          NT_ASSERT(xvdd->aligned_buffer_in_use);
+          XN_ASSERT(xvdd->aligned_buffer_in_use);
           xvdd->aligned_buffer_in_use = FALSE;
           if (srb->SrbStatus == SRB_STATUS_SUCCESS && decode_cdb_is_read(srb))
             memcpy((PUCHAR)shadow->system_address, xvdd->aligned_buffer, shadow->length);
@@ -259,7 +261,7 @@ XenVbd_HandleEvent(PXENVBD_DEVICE_DATA xvdd) {
     }
   }
 
-  if (xvdd->device_state != DEVICE_STATE_ACTIVE && xvdd->device_state != DEVICE_STATE_INACTIVE && xvdd->shadow_free == SHADOW_ENTRIES) {
+  if (xvdd->device_state == DEVICE_STATE_DISCONNECTING && xvdd->shadow_free == SHADOW_ENTRIES) {
     FUNCTION_MSG("ring now empty - completing disconnect\n");
     XenVbd_CompleteDisconnect(xvdd);
   }
@@ -282,23 +284,25 @@ XenVbd_PutSrbOnRing(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
   PVOID system_address;
 
   //if (dump_mode) FUNCTION_ENTER();
-  //FUNCTION_MSG("Srb = %p\n", srb);
 
   //FUNCTION_MSG("aligned_buffer_in_use = %d\n", xvdd->aligned_buffer_in_use);
   //FUNCTION_MSG("shadow_free = %d\n", xvdd->shadow_free);
   
-  NT_ASSERT(srb);
+  XN_ASSERT(srb);
+  
+  if (xvdd->device_state != DEVICE_STATE_ACTIVE) {
+    InsertHeadList(&xvdd->srb_list, (PLIST_ENTRY)srb->SrbExtension);
+    return FALSE;
+  }
 
   if (!dump_mode) {
     if (SxxxPortGetSystemAddress(xvdd, srb, &system_address) != STATUS_SUCCESS) {
       FUNCTION_MSG("Failed to map DataBuffer\n");
       InsertHeadList(&xvdd->srb_list, (PLIST_ENTRY)srb->SrbExtension);
-      //if (dump_mode) FUNCTION_EXIT();
       return FALSE;
     }
     system_address = (PUCHAR)system_address + srb_entry->offset;
   } else {
-    //FUNCTION_MSG("DataBuffer = %p\n", srb->DataBuffer);
     system_address = (PUCHAR)srb->DataBuffer + srb_entry->offset;
   }
   block_count = decode_cdb_length(srb);
@@ -306,12 +310,12 @@ XenVbd_PutSrbOnRing(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
   block_count *= xvdd->bytes_per_sector / 512;
   sector_number *= xvdd->bytes_per_sector / 512;
 
-  NT_ASSERT(block_count * 512 == srb->DataTransferLength);
+  XN_ASSERT(block_count * 512 == srb->DataTransferLength);
   
   sector_number += srb_entry->offset / 512;
   block_count -= srb_entry->offset / 512;
 
-  NT_ASSERT(block_count > 0);
+  XN_ASSERT(block_count > 0);
 
   /* look for pending writes that overlap this one */
   /* we get warnings from drbd if we don't */
@@ -336,14 +340,13 @@ XenVbd_PutSrbOnRing(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
       if (sector_number2 < sector_number && sector_number2 + block_count2 <= sector_number)
         continue;
 
-      KdPrint((__DRIVER_NAME "     Concurrent outstanding write detected (%I64d, %d) (%I64d, %d)\n",
-        sector_number, block_count, sector_number2, block_count2));
+      FUNCTION_MSG("Concurrent outstanding write detected (%I64d, %d) (%I64d, %d)\n",
+        sector_number, block_count, sector_number2, block_count2);
       break;
     }
     if (i != MAX_SHADOW_ENTRIES) {
       /* put the srb back at the start of the queue */
       InsertHeadList(&xvdd->srb_list, (PLIST_ENTRY)srb->SrbExtension);
-      //if (dump_mode) FUNCTION_EXIT();
       return FALSE;
     }
   }
@@ -355,8 +358,8 @@ XenVbd_PutSrbOnRing(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
     //if (dump_mode) FUNCTION_EXIT();
     return FALSE;
   }
-  NT_ASSERT(!shadow->aligned_buffer_in_use);
-  NT_ASSERT(!shadow->srb);
+  XN_ASSERT(!shadow->aligned_buffer_in_use);
+  XN_ASSERT(!shadow->srb);
   shadow->req.sector_number = sector_number;
   shadow->req.handle = 0;
   shadow->req.operation = decode_cdb_is_read(srb)?BLKIF_OP_READ:BLKIF_OP_WRITE;
@@ -380,7 +383,7 @@ XenVbd_PutSrbOnRing(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
       shadow->aligned_buffer_in_use = FALSE;
     }
   } else {
-    NT_ASSERT(!((ULONG_PTR)shadow->system_address & 511));
+    XN_ASSERT(!((ULONG_PTR)shadow->system_address & 511));
     ptr = shadow->system_address;
     shadow->aligned_buffer_in_use = FALSE;
   }
@@ -392,11 +395,10 @@ XenVbd_PutSrbOnRing(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
     if (!dump_mode) {
       physical_address = MmGetPhysicalAddress(ptr);
     } else {
-#if 0
-      ULONG length;       
-      physical_address = StorPortGetPhysicalAddress(xvdd, srb, ptr, &length);
-#endif
-      physical_address = MmGetPhysicalAddress(ptr);
+      ULONG length;
+      physical_address = SxxxPortGetPhysicalAddress(xvdd, srb, ptr, &length);
+      //FUNCTION_MSG("physical_address = %08I64x\n", physical_address.QuadPart);
+      
     }
     gref = XnGrantAccess(xvdd->handle,
            (ULONG)(physical_address.QuadPart >> PAGE_SHIFT), FALSE, INVALID_GRANT_REF, xvdd->grant_tag);
@@ -413,15 +415,15 @@ XenVbd_PutSrbOnRing(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
       /* put the srb back at the start of the queue */
       InsertHeadList(&xvdd->srb_list, (PLIST_ENTRY)srb_entry);
       put_shadow_on_freelist(xvdd, shadow);
-      KdPrint((__DRIVER_NAME "     Out of gref's. Deferring\n"));
+      FUNCTION_MSG("Out of gref's. Deferring\n");
       /* TODO: what if there are no requests currently in progress to kick the queue again?? timer? */
       return FALSE;
     }
     offset = physical_address.LowPart & (PAGE_SIZE - 1);
     length = min(PAGE_SIZE - offset, remaining);
-    NT_ASSERT((offset & 511) == 0);
-    NT_ASSERT((length & 511) == 0);
-    NT_ASSERT(offset + length <= PAGE_SIZE);
+    XN_ASSERT((offset & 511) == 0);
+    XN_ASSERT((length & 511) == 0);
+    XN_ASSERT(offset + length <= PAGE_SIZE);
     shadow->req.seg[shadow->req.nr_segments].gref = gref;
     shadow->req.seg[shadow->req.nr_segments].first_sect = (UCHAR)(offset / 512);
     shadow->req.seg[shadow->req.nr_segments].last_sect = (UCHAR)(((offset + length) / 512) - 1);
@@ -462,8 +464,6 @@ XenVbd_FillModePage(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
   RtlZeroMemory(buffer, ARRAY_SIZE(buffer));
   offset = 0;
 
-  //KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
-  
   switch (srb->Cdb[0]) {
   case SCSIOP_MODE_SENSE:
     cdb_llbaa = FALSE;
@@ -474,7 +474,7 @@ XenVbd_FillModePage(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
     parameter_header->MediumType = 0;
     parameter_header->DeviceSpecificParameter = 0;
     if (xvdd->device_mode == XENVBD_DEVICEMODE_READ) {
-      KdPrint((__DRIVER_NAME " Mode sense to a read only disk.\n"));
+      FUNCTION_MSG(" Mode sense to a read only disk.\n");
       parameter_header->DeviceSpecificParameter |= MODE_DSP_WRITE_PROTECT; 
     }
     offset += sizeof(MODE_PARAMETER_HEADER);
@@ -487,15 +487,14 @@ XenVbd_FillModePage(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
     parameter_header10 = (PMODE_PARAMETER_HEADER10)&buffer[offset];
     parameter_header10->MediumType = 0;
     parameter_header10->DeviceSpecificParameter = 0;
-    if (xvdd->device_mode == XENVBD_DEVICEMODE_READ)
-    {
-      KdPrint((__DRIVER_NAME " Mode sense to a read only disk.\n"));
+    if (xvdd->device_mode == XENVBD_DEVICEMODE_READ) {
+      FUNCTION_MSG(" Mode sense to a read only disk.\n");
       parameter_header10->DeviceSpecificParameter |= MODE_DSP_WRITE_PROTECT; 
     }
     offset += sizeof(MODE_PARAMETER_HEADER10);
     break;
   default:
-    KdPrint((__DRIVER_NAME "     SCSIOP_MODE_SENSE_WTF (%02x)\n", (ULONG)srb->Cdb[0]));
+    FUNCTION_MSG("SCSIOP_MODE_SENSE_WTF (%02x)\n", (ULONG)srb->Cdb[0]);
     return FALSE;
   }  
   
@@ -600,7 +599,6 @@ XenVbd_ResetBus(PXENVBD_DEVICE_DATA xvdd, ULONG PathId) {
   /* need to make sure that each SRB is only reset once */
   LIST_ENTRY srb_reset_list;
   PLIST_ENTRY list_entry;
-  //STOR_LOCK_HANDLE lock_handle;
 
   UNREFERENCED_PARAMETER(PathId);
 
@@ -676,17 +674,12 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
   #endif
   PCDB cdb;
   ULONG data_transfer_length;
-  UCHAR srb_status = SRB_STATUS_PENDING;
+  UCHAR srb_status;
   ULONG notify = FALSE;
   PSCSI_REQUEST_BLOCK srb;
   srb_list_entry_t *srb_entry;
   PSRB_IO_CONTROL sic;
   ULONG prev_offset;
-
-  if (xvdd->device_state != DEVICE_STATE_ACTIVE) {
-    FUNCTION_MSG("Not yet active - state = %d\n", xvdd->device_state);
-    return;
-  }
 
   while(!xvdd->aligned_buffer_in_use && xvdd->shadow_free && (srb_entry = (srb_list_entry_t *)RemoveHeadList(&xvdd->srb_list)) != (srb_list_entry_t *)&xvdd->srb_list) {
     srb = srb_entry->srb;
@@ -700,23 +693,28 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
     }
 
     data_transfer_length = srb->DataTransferLength;
+    srb_status = SRB_STATUS_PENDING;
     
     switch (srb->Function) {
     case SRB_FUNCTION_EXECUTE_SCSI:
+      if (xvdd->device_state != DEVICE_STATE_ACTIVE) {
+        FUNCTION_MSG("Not yet active - state = %d\n", xvdd->device_state);
+        InsertHeadList(&xvdd->srb_list, (PLIST_ENTRY)srb->SrbExtension);
+        break;
+      }
       cdb = (PCDB)srb->Cdb;
-
       switch(cdb->CDB6GENERIC.OperationCode) {
       case SCSIOP_TEST_UNIT_READY:
         if (dump_mode)
-          KdPrint((__DRIVER_NAME "     Command = TEST_UNIT_READY\n"));
+          FUNCTION_MSG("Command = TEST_UNIT_READY\n");
         srb_status = SRB_STATUS_SUCCESS;
         srb->ScsiStatus = 0;
         break;
       case SCSIOP_INQUIRY:
-        if (dump_mode)
-          KdPrint((__DRIVER_NAME "     Command = INQUIRY\n"));
-  //      KdPrint((__DRIVER_NAME "     (LUN = %d, EVPD = %d, Page Code = %02X)\n", srb->Cdb[1] >> 5, srb->Cdb[1] & 1, srb->Cdb[2]));
-  //      KdPrint((__DRIVER_NAME "     (Length = %d)\n", srb->DataTransferLength));
+//        if (dump_mode)
+          FUNCTION_MSG("Command = INQUIRY\n");
+  //      FUNCTION_MSG("(LUN = %d, EVPD = %d, Page Code = %02X)\n", srb->Cdb[1] >> 5, srb->Cdb[1] & 1, srb->Cdb[2]);
+  //      FUNCTION_MSG("(Length = %d)\n", srb->DataTransferLength);
         
         data_buffer = srb->DataBuffer;
         RtlZeroMemory(data_buffer, srb->DataTransferLength);
@@ -760,22 +758,31 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
               data_buffer[0] = DIRECT_ACCESS_DEVICE;
               data_buffer[1] = VPD_SERIAL_NUMBER;
               data_buffer[2] = 0x00;
-              data_buffer[3] = 8;
-              memset(&data_buffer[4], ' ', 8);
-              data_transfer_length = 12;
+              data_buffer[3] = (UCHAR)strlen(xvdd->serial_number);
+              if (data_transfer_length > 4) {
+                memcpy(&data_buffer[4], xvdd->serial_number, min(data_transfer_length - 4, strlen(xvdd->serial_number)));
+              }
+              data_transfer_length = 4 + (UCHAR)strlen(xvdd->serial_number);
               break;
             case VPD_DEVICE_IDENTIFIERS: /* identification - we don't support any so just return zero */
               FUNCTION_MSG("VPD_DEVICE_IDENTIFIERS\n");
               data_buffer[0] = DIRECT_ACCESS_DEVICE;
               data_buffer[1] = VPD_DEVICE_IDENTIFIERS;
               data_buffer[2] = 0x00;
-              //data_buffer[3] = 4 + (UCHAR)strlen(xvdd->vectors.path); /* length */
-              data_buffer[4] = 2; /* ASCII */
-              data_buffer[5] = 1; /* VendorId */
-              data_buffer[6] = 0;
-              //data_buffer[7] = (UCHAR)strlen(xvdd->vectors.path);
-              //memcpy(&data_buffer[8], xvdd->vectors.path, strlen(xvdd->vectors.path));
-              //data_transfer_length = (ULONG)(8 + strlen(xvdd->vectors.path));
+              data_buffer[3] = 2 * (4 + (UCHAR)strlen(xvdd->serial_number));
+              if (data_transfer_length >= 4 + 2 * (4 + (ULONG)strlen(xvdd->serial_number))) {
+                data_buffer[4] = 2; /* ASCII */
+                data_buffer[5] = 0; /* VendorId */
+                data_buffer[6] = 0; /* reserved */
+                data_buffer[7] = (UCHAR)strlen(xvdd->serial_number);
+                memcpy(&data_buffer[8], xvdd->serial_number, (UCHAR)strlen(xvdd->serial_number));
+                data_buffer[8 + (UCHAR)strlen(xvdd->serial_number) + 0] = 2; /* ASCII */
+                data_buffer[8 + (UCHAR)strlen(xvdd->serial_number) + 1] = 1; /* T10 VendorId */
+                data_buffer[8 + (UCHAR)strlen(xvdd->serial_number) + 2] = 0; /* Reserved */
+                data_buffer[8 + (UCHAR)strlen(xvdd->serial_number) + 3] = (UCHAR)strlen(xvdd->serial_number);
+                memcpy(&data_buffer[8 + (UCHAR)strlen(xvdd->serial_number) + 4], xvdd->serial_number, (UCHAR)strlen(xvdd->serial_number));
+              }
+              data_transfer_length = 4 + 2 * (4 + (ULONG)strlen(xvdd->serial_number));
               break;
             case VPD_BLOCK_LIMITS: /* to indicate support for UNMAP (TRIM/DISCARD) */
               FUNCTION_MSG("VPD_BLOCK_LIMITS\n");
@@ -836,36 +843,33 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
               data_transfer_length = 12;
               break;
             default:
-              //KdPrint((__DRIVER_NAME "     Unknown Page %02x requested\n", srb->Cdb[2]));
+              FUNCTION_MSG("Unknown Page %02x requested\n", srb->Cdb[2]);
               srb_status = SRB_STATUS_ERROR;
               break;
             }
           }
           break;
         default:
-          //KdPrint((__DRIVER_NAME "     Unknown DeviceType %02x requested\n", xvdd->device_type));
+          FUNCTION_MSG("Unknown DeviceType %02x requested\n", xvdd->device_type);
           srb_status = SRB_STATUS_ERROR;
           break;
         }
         break;
       case SCSIOP_READ_CAPACITY:
         //if (dump_mode)
-        //  KdPrint((__DRIVER_NAME "     Command = READ_CAPACITY\n"));
-        //KdPrint((__DRIVER_NAME "       LUN = %d, RelAdr = %d\n", srb->Cdb[1] >> 4, srb->Cdb[1] & 1));
-        //KdPrint((__DRIVER_NAME "       LBA = %02x%02x%02x%02x\n", srb->Cdb[2], srb->Cdb[3], srb->Cdb[4], srb->Cdb[5]));
-        //KdPrint((__DRIVER_NAME "       PMI = %d\n", srb->Cdb[8] & 1));
+          FUNCTION_MSG("Command = READ_CAPACITY\n");
+        //FUNCTION_MSG("  LUN = %d, RelAdr = %d\n", srb->Cdb[1] >> 4, srb->Cdb[1] & 1);
+        //FUNCTION_MSG("  LBA = %02x%02x%02x%02x\n", srb->Cdb[2], srb->Cdb[3], srb->Cdb[4], srb->Cdb[5]);
+        //FUNCTION_MSG("  PMI = %d\n", srb->Cdb[8] & 1);
         //data_buffer = LongLongToPtr(ScsiPortGetPhysicalAddress(xvdd, srb, srb->DataBuffer, &data_buffer_length).QuadPart);
         data_buffer = srb->DataBuffer;
         RtlZeroMemory(data_buffer, srb->DataTransferLength);
-        if ((xvdd->total_sectors - 1) >> 32)
-        {
+        if ((xvdd->total_sectors - 1) >> 32) {
           data_buffer[0] = 0xff;
           data_buffer[1] = 0xff;
           data_buffer[2] = 0xff;
           data_buffer[3] = 0xff;
-        }
-        else
-        {
+        } else {
           data_buffer[0] = (unsigned char)((xvdd->total_sectors - 1) >> 24) & 0xff;
           data_buffer[1] = (unsigned char)((xvdd->total_sectors - 1) >> 16) & 0xff;
           data_buffer[2] = (unsigned char)((xvdd->total_sectors - 1) >> 8) & 0xff;
@@ -881,10 +885,10 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
         break;
       case SCSIOP_READ_CAPACITY16:
         //if (dump_mode)
-          KdPrint((__DRIVER_NAME "     Command = READ_CAPACITY16\n"));
-        //KdPrint((__DRIVER_NAME "       LUN = %d, RelAdr = %d\n", srb->Cdb[1] >> 4, srb->Cdb[1] & 1));
-        //KdPrint((__DRIVER_NAME "       LBA = %02x%02x%02x%02x\n", srb->Cdb[2], srb->Cdb[3], srb->Cdb[4], srb->Cdb[5]));
-        //KdPrint((__DRIVER_NAME "       PMI = %d\n", srb->Cdb[8] & 1));
+          FUNCTION_MSG("Command = READ_CAPACITY16\n");
+        //FUNCTION_MSG("  LUN = %d, RelAdr = %d\n", srb->Cdb[1] >> 4, srb->Cdb[1] & 1);
+        //FUNCTION_MSG("  LBA = %02x%02x%02x%02x\n", srb->Cdb[2], srb->Cdb[3], srb->Cdb[4], srb->Cdb[5]);
+        //FUNCTION_MSG("  PMI = %d\n", srb->Cdb[8] & 1);
         data_buffer = srb->DataBuffer;
         RtlZeroMemory(data_buffer, srb->DataTransferLength);
         data_buffer[0] = (unsigned char)((xvdd->total_sectors - 1) >> 56) & 0xff;
@@ -915,7 +919,7 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
           break;
         default:
           data_buffer[13] = 0; /* 512 byte hardware sectors */
-          KdPrint((__DRIVER_NAME "     Unknown logical blocks per physical block %d (%d / %d)\n", xvdd->hw_bytes_per_sector / xvdd->bytes_per_sector, xvdd->hw_bytes_per_sector, xvdd->bytes_per_sector));
+          FUNCTION_MSG("Unknown logical blocks per physical block %d (%d / %d)\n", xvdd->hw_bytes_per_sector / xvdd->bytes_per_sector, xvdd->hw_bytes_per_sector, xvdd->bytes_per_sector);
           break;
         }
         data_buffer[14] = 0xC0; //0;
@@ -927,7 +931,7 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
       case SCSIOP_MODE_SENSE:
       case SCSIOP_MODE_SENSE10:
         if (dump_mode)
-          KdPrint((__DRIVER_NAME "     Command = MODE_SENSE (DBD = %d, PC = %d, Page Code = %02x)\n", srb->Cdb[1] & 0x08, srb->Cdb[2] & 0xC0, srb->Cdb[2] & 0x3F));
+          FUNCTION_MSG("Command = MODE_SENSE (DBD = %d, PC = %d, Page Code = %02x)\n", srb->Cdb[1] & 0x08, srb->Cdb[2] & 0xC0, srb->Cdb[2] & 0x3F);
         data_transfer_length = XenVbd_FillModePage(xvdd, srb);
         srb_status = SRB_STATUS_SUCCESS;
         break;
@@ -944,16 +948,18 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
       case SCSIOP_WRITE_SAME16:
         /* not yet supported */
         FUNCTION_MSG("WRITE_SAME\n");
-        break;
+        srb_status = SRB_STATUS_ERROR;
+       break;
       case SCSIOP_UNMAP:
         /* not yet supported */
         FUNCTION_MSG("UNMAP\n");
+        srb_status = SRB_STATUS_ERROR;
         break;
       case SCSIOP_VERIFY:
       case SCSIOP_VERIFY16:
         // Should we do more here?
         if (dump_mode)
-          KdPrint((__DRIVER_NAME "     Command = VERIFY\n"));
+          FUNCTION_MSG("Command = VERIFY\n");
         srb_status = SRB_STATUS_SUCCESS;
         break;
       case SCSIOP_REPORT_LUNS:
@@ -978,13 +984,13 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
         break;
       case SCSIOP_REQUEST_SENSE:
         if (dump_mode)
-          KdPrint((__DRIVER_NAME "     Command = REQUEST_SENSE\n"));
+          FUNCTION_MSG("Command = REQUEST_SENSE\n");
         data_transfer_length = XenVbd_MakeSense(xvdd, srb, xvdd->last_sense_key, xvdd->last_additional_sense_code);
         srb_status = SRB_STATUS_SUCCESS;
         break;      
       case SCSIOP_READ_TOC:
-        if (dump_mode)
-          KdPrint((__DRIVER_NAME "     Command = READ_TOC\n"));
+        //if (dump_mode)
+          FUNCTION_MSG("Command = READ_TOC\n");
         data_buffer = srb->DataBuffer;
   /*
   #define READ_TOC_FORMAT_TOC         0x00
@@ -993,15 +999,7 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
   #define READ_TOC_FORMAT_PMA         0x03
   #define READ_TOC_FORMAT_ATIP        0x04
   */
-  //      KdPrint((__DRIVER_NAME "     Msf = %d\n", cdb->READ_TOC.Msf));
-  //      KdPrint((__DRIVER_NAME "     LogicalUnitNumber = %d\n", cdb->READ_TOC.LogicalUnitNumber));
-  //      KdPrint((__DRIVER_NAME "     Format2 = %d\n", cdb->READ_TOC.Format2));
-  //      KdPrint((__DRIVER_NAME "     StartingTrack = %d\n", cdb->READ_TOC.StartingTrack));
-  //      KdPrint((__DRIVER_NAME "     AllocationLength = %d\n", (cdb->READ_TOC.AllocationLength[0] << 8) | cdb->READ_TOC.AllocationLength[1]));
-  //      KdPrint((__DRIVER_NAME "     Control = %d\n", cdb->READ_TOC.Control));
-  //      KdPrint((__DRIVER_NAME "     Format = %d\n", cdb->READ_TOC.Format));
-        switch (cdb->READ_TOC.Format2)
-        {
+        switch (cdb->READ_TOC.Format2) {
         case READ_TOC_FORMAT_TOC:
           data_buffer[0] = 0; // length MSB
           data_buffer[1] = 10; // length LSB
@@ -1030,25 +1028,29 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
         }
         break;
       case SCSIOP_START_STOP_UNIT:
-        KdPrint((__DRIVER_NAME "     Command = SCSIOP_START_STOP_UNIT\n"));
+        FUNCTION_MSG("Command = SCSIOP_START_STOP_UNIT\n");
         srb_status = SRB_STATUS_SUCCESS;
         break;
       case SCSIOP_RESERVE_UNIT:
-        KdPrint((__DRIVER_NAME "     Command = SCSIOP_RESERVE_UNIT\n"));
+        FUNCTION_MSG("Command = SCSIOP_RESERVE_UNIT\n");
         srb_status = SRB_STATUS_SUCCESS;
         break;
       case SCSIOP_RELEASE_UNIT:
-        KdPrint((__DRIVER_NAME "     Command = SCSIOP_RELEASE_UNIT\n"));
+        FUNCTION_MSG("Command = SCSIOP_RELEASE_UNIT\n");
+        srb_status = SRB_STATUS_SUCCESS;
+        break;
+      case SCSIOP_SYNCHRONIZE_CACHE:
+        FUNCTION_MSG("Command = SCSIOP_SYNCHRONIZE_CACHE\n");
         srb_status = SRB_STATUS_SUCCESS;
         break;
       default:
-        KdPrint((__DRIVER_NAME "     Unhandled EXECUTE_SCSI Command = %02X\n", srb->Cdb[0]));
+        FUNCTION_MSG("Unhandled EXECUTE_SCSI Command = %02X\n", srb->Cdb[0]);
         xvdd->last_sense_key = SCSI_SENSE_ILLEGAL_REQUEST;
         srb_status = SRB_STATUS_ERROR;
         break;
       }
       if (srb_status == SRB_STATUS_ERROR) {
-        KdPrint((__DRIVER_NAME "     EXECUTE_SCSI Command = %02X returned error %02x\n", srb->Cdb[0], xvdd->last_sense_key));
+        FUNCTION_MSG("EXECUTE_SCSI Command = %02X returned error %02x\n", srb->Cdb[0], xvdd->last_sense_key);
         if (xvdd->last_sense_key == SCSI_SENSE_NO_SENSE) {
           xvdd->last_sense_key = SCSI_SENSE_ILLEGAL_REQUEST;
           xvdd->last_additional_sense_code = SCSI_ADSENSE_INVALID_CDB;
@@ -1058,8 +1060,11 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
         XenVbd_MakeAutoSense(xvdd, srb);
         SxxxPortNotification(RequestComplete, xvdd, srb);
       } else if (srb_status != SRB_STATUS_PENDING) {
+        if (srb->ScsiStatus != 0) {
+          FUNCTION_MSG("ScsiStatus = 0x%02x\n", srb->ScsiStatus);
+        }
         if (data_transfer_length > srb->DataTransferLength)
-          KdPrint((__DRIVER_NAME "     data_transfer_length too big - %d > %d\n", data_transfer_length, srb->DataTransferLength));
+          FUNCTION_MSG("data_transfer_length too big - %d > %d\n", data_transfer_length, srb->DataTransferLength);
         
         if (srb_status == SRB_STATUS_SUCCESS && data_transfer_length < srb->DataTransferLength) {
           srb->SrbStatus = SRB_STATUS_DATA_OVERRUN;
@@ -1073,97 +1078,104 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
       }
       break;
     case SRB_FUNCTION_FLUSH:
-      KdPrint((__DRIVER_NAME "     SRB_FUNCTION_FLUSH %p, xvdd->shadow_free = %d\n", srb, xvdd->shadow_free));
+      FUNCTION_MSG("SRB_FUNCTION_FLUSH %p, xvdd->shadow_free = %d\n", srb, xvdd->shadow_free);
       srb->SrbStatus = SRB_STATUS_SUCCESS;
       SxxxPortNotification(RequestComplete, xvdd, srb);
       break;
     #ifdef _NTSTORPORT_      
     case SRB_FUNCTION_PNP:
-      KdPrint((__DRIVER_NAME "     SRB_FUNCTION_PNP\n"));
+      FUNCTION_MSG("SRB_FUNCTION_PNP\n");
       sprb = (PSCSI_PNP_REQUEST_BLOCK)srb;
       switch (sprb->PnPAction)
       {
       case StorStartDevice:
-        KdPrint((__DRIVER_NAME "      StorStartDevice\n"));
+        FUNCTION_MSG(" StorStartDevice\n");
         break;
       case StorRemoveDevice:
-        KdPrint((__DRIVER_NAME "      StorRemoveDevice\n"));
+        FUNCTION_MSG(" StorRemoveDevice\n");
         break;
       case StorStopDevice:
-        KdPrint((__DRIVER_NAME "      StorStopDevice\n"));
+        FUNCTION_MSG(" StorStopDevice\n");
         break;
       case StorQueryCapabilities:
-        KdPrint((__DRIVER_NAME "      StorQueryCapabilities\n"));
+        FUNCTION_MSG(" StorQueryCapabilities\n");
         break;
       case StorFilterResourceRequirements:
-        KdPrint((__DRIVER_NAME "      StorFilterResourceRequirements\n"));
+        FUNCTION_MSG(" StorFilterResourceRequirements\n");
         break;
       default:
-        KdPrint((__DRIVER_NAME "      Stor%d\n", sprb->PnPAction));
+        FUNCTION_MSG(" Stor%d\n", sprb->PnPAction);
         break;
       }
-      KdPrint((__DRIVER_NAME "      SrbPnPFlags = %08x\n", sprb->SrbPnPFlags));
+      FUNCTION_MSG(" SrbPnPFlags = %08x\n", sprb->SrbPnPFlags);
       srb->SrbStatus = SRB_STATUS_SUCCESS;
       SxxxPortNotification(RequestComplete, xvdd, srb);
       break;
       
     case SRB_FUNCTION_POWER:
-      KdPrint((__DRIVER_NAME "     SRB_FUNCTION_POWER\n"));
+      FUNCTION_MSG("SRB_FUNCTION_POWER\n");   
+      FUNCTION_MSG("IRQL = %d\n", KeGetCurrentIrql());
       spwrb = (PSCSI_POWER_REQUEST_BLOCK)srb;
-      switch (spwrb->PowerAction)
-      {
-      case StorPowerActionNone:
-        KdPrint((__DRIVER_NAME "      StorPowerActionNone\n"));
-        break;
-      case StorPowerActionReserved:
-        KdPrint((__DRIVER_NAME "      StorPowerActionReserved\n"));
-        break;
-      case StorPowerActionSleep:
-        KdPrint((__DRIVER_NAME "      StorPowerActionSleep\n"));
-        break;
-      case StorPowerActionHibernate:
-        KdPrint((__DRIVER_NAME "      StorPowerActionHibernate\n"));
-        break;
-      case StorPowerActionShutdown:
-        KdPrint((__DRIVER_NAME "      StorPowerActionShutdown\n"));
-        break;
-      case StorPowerActionShutdownReset:
-        KdPrint((__DRIVER_NAME "      StorPowerActionShutdownReset\n"));
-        break;
-      case StorPowerActionShutdownOff:
-        KdPrint((__DRIVER_NAME "      StorPowerActionShutdownOff\n"));
-        break;
-      case StorPowerActionWarmEject:
-        KdPrint((__DRIVER_NAME "      StorPowerActionWarmEject\n"));
-        break;
-      default:
-        KdPrint((__DRIVER_NAME "      Stor%d\n", spwrb->PowerAction));
-        break;
+      if (spwrb->DevicePowerState == StorPowerDeviceD0) {
+        FUNCTION_MSG("Entering D0\n");
+      } else {
+        FUNCTION_MSG("Entering D%d (%d)\n", spwrb->DevicePowerState - StorPowerDeviceD0, spwrb->DevicePowerState);
+        switch (spwrb->PowerAction) {
+        case StorPowerActionNone:
+          FUNCTION_MSG(" StorPowerActionNone\n");
+          break;
+        case StorPowerActionReserved:
+          FUNCTION_MSG(" StorPowerActionReserved\n");
+          break;
+        case StorPowerActionSleep:
+          FUNCTION_MSG(" StorPowerActionSleep\n");
+          break;
+        case StorPowerActionHibernate:
+          FUNCTION_MSG(" StorPowerActionHibernate\n");
+          break;
+        case StorPowerActionShutdown:
+          FUNCTION_MSG(" StorPowerActionShutdown\n");
+          break;
+        case StorPowerActionShutdownReset:
+          FUNCTION_MSG(" StorPowerActionShutdownReset\n");
+          break;
+        case StorPowerActionShutdownOff:
+          FUNCTION_MSG(" StorPowerActionShutdownOff\n");
+          break;
+        case StorPowerActionWarmEject:
+          FUNCTION_MSG(" StorPowerActionWarmEject\n");
+          break;
+        default:
+          FUNCTION_MSG(" Stor%d\n", spwrb->PowerAction);
+          break;
+        }
       }
+      xvdd->power_state = spwrb->DevicePowerState;
+      xvdd->power_action = spwrb->PowerAction;
       srb->SrbStatus = SRB_STATUS_SUCCESS;
       SxxxPortNotification(RequestComplete, xvdd, srb);
       break;
     case SRB_FUNCTION_DUMP_POINTERS:
-      KdPrint((__DRIVER_NAME "     SRB_FUNCTION_DUMP_POINTERS\n"));
-      KdPrint((__DRIVER_NAME "     DataTransferLength = %d\n", srb->DataTransferLength));
+      FUNCTION_MSG("SRB_FUNCTION_DUMP_POINTERS\n");
+      FUNCTION_MSG("DataTransferLength = %d\n", srb->DataTransferLength);
       dump_pointers = srb->DataBuffer;
-      KdPrint((__DRIVER_NAME "      Version = %d\n", dump_pointers->Version));
-      KdPrint((__DRIVER_NAME "      Size = %d\n", dump_pointers->Size));
-      KdPrint((__DRIVER_NAME "      DriverName = %S\n", dump_pointers->DriverName));
-      KdPrint((__DRIVER_NAME "      AdapterObject = %p\n", dump_pointers->AdapterObject));
-      KdPrint((__DRIVER_NAME "      MappedRegisterBase = %d\n", dump_pointers->MappedRegisterBase));
-      KdPrint((__DRIVER_NAME "      CommonBufferSize = %d\n", dump_pointers->CommonBufferSize));
-      KdPrint((__DRIVER_NAME "      MiniportPrivateDumpData = %p\n", dump_pointers->MiniportPrivateDumpData));
-      KdPrint((__DRIVER_NAME "      SystemIoBusNumber = %d\n", dump_pointers->SystemIoBusNumber));
-      KdPrint((__DRIVER_NAME "      AdapterInterfaceType = %d\n", dump_pointers->AdapterInterfaceType));
-      KdPrint((__DRIVER_NAME "      MaximumTransferLength = %d\n", dump_pointers->MaximumTransferLength));
-      KdPrint((__DRIVER_NAME "      NumberOfPhysicalBreaks = %d\n", dump_pointers->NumberOfPhysicalBreaks));
-      KdPrint((__DRIVER_NAME "      AlignmentMask = %d\n", dump_pointers->AlignmentMask));
-      KdPrint((__DRIVER_NAME "      NumberOfAccessRanges = %d\n", dump_pointers->NumberOfAccessRanges));
-      KdPrint((__DRIVER_NAME "      NumberOfBuses = %d\n", dump_pointers->NumberOfBuses));
-      KdPrint((__DRIVER_NAME "      Master = %d\n", dump_pointers->Master));
-      KdPrint((__DRIVER_NAME "      MapBuffers = %d\n", dump_pointers->MapBuffers));
-      KdPrint((__DRIVER_NAME "      MaximumNumberOfTargets = %d\n", dump_pointers->MaximumNumberOfTargets));
+      FUNCTION_MSG(" Version = %d\n", dump_pointers->Version);
+      FUNCTION_MSG(" Size = %d\n", dump_pointers->Size);
+      FUNCTION_MSG(" DriverName = %S\n", dump_pointers->DriverName);
+      FUNCTION_MSG(" AdapterObject = %p\n", dump_pointers->AdapterObject);
+      FUNCTION_MSG(" MappedRegisterBase = %d\n", dump_pointers->MappedRegisterBase);
+      FUNCTION_MSG(" CommonBufferSize = %d\n", dump_pointers->CommonBufferSize);
+      FUNCTION_MSG(" MiniportPrivateDumpData = %p\n", dump_pointers->MiniportPrivateDumpData);
+      FUNCTION_MSG(" SystemIoBusNumber = %d\n", dump_pointers->SystemIoBusNumber);
+      FUNCTION_MSG(" AdapterInterfaceType = %d\n", dump_pointers->AdapterInterfaceType);
+      FUNCTION_MSG(" MaximumTransferLength = %d\n", dump_pointers->MaximumTransferLength);
+      FUNCTION_MSG(" NumberOfPhysicalBreaks = %d\n", dump_pointers->NumberOfPhysicalBreaks);
+      FUNCTION_MSG(" AlignmentMask = %d\n", dump_pointers->AlignmentMask);
+      FUNCTION_MSG(" NumberOfAccessRanges = %d\n", dump_pointers->NumberOfAccessRanges);
+      FUNCTION_MSG(" NumberOfBuses = %d\n", dump_pointers->NumberOfBuses);
+      FUNCTION_MSG(" Master = %d\n", dump_pointers->Master);
+      FUNCTION_MSG(" MapBuffers = %d\n", dump_pointers->MapBuffers);
+      FUNCTION_MSG(" MaximumNumberOfTargets = %d\n", dump_pointers->MaximumNumberOfTargets);
 
       dump_pointers->Version = DUMP_MINIPORT_VERSION_1;
       dump_pointers->Size = sizeof(MINIPORT_DUMP_POINTERS);
@@ -1172,40 +1184,39 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
       dump_pointers->MappedRegisterBase = 0;
       dump_pointers->CommonBufferSize = 0;
       dump_pointers->MiniportPrivateDumpData = xvdd;
-      dump_pointers->AdapterInterfaceType = Internal;
-      dump_pointers->MaximumTransferLength = 4 * 1024 * 1024; //BLKIF_MAX_SEGMENTS_PER_REQUEST * PAGE_SIZE;;
-      dump_pointers->NumberOfPhysicalBreaks = dump_pointers->MaximumTransferLength >> PAGE_SHIFT; //BLKIF_MAX_SEGMENTS_PER_REQUEST - 1;
+      dump_pointers->MaximumTransferLength = 4 * 1024 * 1024;
+      dump_pointers->NumberOfPhysicalBreaks = dump_pointers->MaximumTransferLength >> PAGE_SHIFT;
       dump_pointers->AlignmentMask = 0;
-      dump_pointers->NumberOfAccessRanges = 1;
+      dump_pointers->NumberOfAccessRanges = 0;
       dump_pointers->NumberOfBuses = 1;
       dump_pointers->Master = TRUE;
       dump_pointers->MapBuffers = STOR_MAP_NON_READ_WRITE_BUFFERS;
       dump_pointers->MaximumNumberOfTargets = 2;
 
-      KdPrint((__DRIVER_NAME "      Version = %d\n", dump_pointers->Version));
-      KdPrint((__DRIVER_NAME "      Size = %d\n", dump_pointers->Size));
-      //KdPrint((__DRIVER_NAME "      DriverName = %S\n", dump_pointers->DriverName));
-      KdPrint((__DRIVER_NAME "      AdapterObject = %p\n", dump_pointers->AdapterObject));
-      KdPrint((__DRIVER_NAME "      MappedRegisterBase = %d\n", dump_pointers->MappedRegisterBase));
-      KdPrint((__DRIVER_NAME "      CommonBufferSize = %d\n", dump_pointers->CommonBufferSize));
-      KdPrint((__DRIVER_NAME "      MiniportPrivateDumpData = %p\n", dump_pointers->MiniportPrivateDumpData));
-      KdPrint((__DRIVER_NAME "      SystemIoBusNumber = %d\n", dump_pointers->SystemIoBusNumber));
-      KdPrint((__DRIVER_NAME "      AdapterInterfaceType = %d\n", dump_pointers->AdapterInterfaceType));
-      KdPrint((__DRIVER_NAME "      MaximumTransferLength = %d\n", dump_pointers->MaximumTransferLength));
-      KdPrint((__DRIVER_NAME "      NumberOfPhysicalBreaks = %d\n", dump_pointers->NumberOfPhysicalBreaks));
-      KdPrint((__DRIVER_NAME "      AlignmentMask = %d\n", dump_pointers->AlignmentMask));
-      KdPrint((__DRIVER_NAME "      NumberOfAccessRanges = %d\n", dump_pointers->NumberOfAccessRanges));
-      KdPrint((__DRIVER_NAME "      NumberOfBuses = %d\n", dump_pointers->NumberOfBuses));
-      KdPrint((__DRIVER_NAME "      Master = %d\n", dump_pointers->Master));
-      KdPrint((__DRIVER_NAME "      MapBuffers = %d\n", dump_pointers->MapBuffers));
-      KdPrint((__DRIVER_NAME "      MaximumNumberOfTargets = %d\n", dump_pointers->MaximumNumberOfTargets));
+      FUNCTION_MSG(" Version = %d\n", dump_pointers->Version);
+      FUNCTION_MSG(" Size = %d\n", dump_pointers->Size);
+      //FUNCTION_MSG(" DriverName = %S\n", dump_pointers->DriverName);
+      FUNCTION_MSG(" AdapterObject = %p\n", dump_pointers->AdapterObject);
+      FUNCTION_MSG(" MappedRegisterBase = %d\n", dump_pointers->MappedRegisterBase);
+      FUNCTION_MSG(" CommonBufferSize = %d\n", dump_pointers->CommonBufferSize);
+      FUNCTION_MSG(" MiniportPrivateDumpData = %p\n", dump_pointers->MiniportPrivateDumpData);
+      FUNCTION_MSG(" SystemIoBusNumber = %d\n", dump_pointers->SystemIoBusNumber);
+      FUNCTION_MSG(" AdapterInterfaceType = %d\n", dump_pointers->AdapterInterfaceType);
+      FUNCTION_MSG(" MaximumTransferLength = %d\n", dump_pointers->MaximumTransferLength);
+      FUNCTION_MSG(" NumberOfPhysicalBreaks = %d\n", dump_pointers->NumberOfPhysicalBreaks);
+      FUNCTION_MSG(" AlignmentMask = %d\n", dump_pointers->AlignmentMask);
+      FUNCTION_MSG(" NumberOfAccessRanges = %d\n", dump_pointers->NumberOfAccessRanges);
+      FUNCTION_MSG(" NumberOfBuses = %d\n", dump_pointers->NumberOfBuses);
+      FUNCTION_MSG(" Master = %d\n", dump_pointers->Master);
+      FUNCTION_MSG(" MapBuffers = %d\n", dump_pointers->MapBuffers);
+      FUNCTION_MSG(" MaximumNumberOfTargets = %d\n", dump_pointers->MaximumNumberOfTargets);
 
       srb->SrbStatus = SRB_STATUS_SUCCESS;
       SxxxPortNotification(RequestComplete, xvdd, srb);
       break;
     #endif
     case SRB_FUNCTION_SHUTDOWN:
-      KdPrint((__DRIVER_NAME "     SRB_FUNCTION_SHUTDOWN %p, xvdd->shadow_free = %d\n", srb, xvdd->shadow_free));
+      FUNCTION_MSG("SRB_FUNCTION_SHUTDOWN %p, xvdd->shadow_free = %d\n", srb, xvdd->shadow_free);
       srb->SrbStatus = SRB_STATUS_SUCCESS;
       SxxxPortNotification(RequestComplete, xvdd, srb);
       break;
@@ -1229,15 +1240,20 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
       srb->SrbStatus = SRB_STATUS_INVALID_REQUEST;
       SxxxPortNotification(RequestComplete, xvdd, srb);
       break;
+    case 0x27:
+      FUNCTION_MSG("SRB_FUNCTION_FREE_DUMP_POINTERS\n");
+      srb->SrbStatus = SRB_STATUS_SUCCESS;
+      SxxxPortNotification(RequestComplete, xvdd, srb);
+      break;
     default:
-      KdPrint((__DRIVER_NAME "     Unhandled srb->Function = %08X\n", srb->Function));
+      FUNCTION_MSG("Unhandled srb->Function = %08X\n", srb->Function);
       srb->SrbStatus = SRB_STATUS_INVALID_REQUEST;
       SxxxPortNotification(RequestComplete, xvdd, srb);
       break;
     }
     if ((PLIST_ENTRY)srb_entry == xvdd->srb_list.Flink && srb_entry->offset == prev_offset) {
       FUNCTION_MSG("Same entry\n");
-      /* same entry was put back onto the head of the list unchanged so we can't progress */
+      /* same entry was put back onto the head of the list unchanged, so we can't progress */
       break;
     }
   }

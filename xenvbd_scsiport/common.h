@@ -50,6 +50,7 @@ struct {
   ULONG feature_flush_cache;
   ULONG feature_discard;
   ULONG feature_barrier;
+  CHAR serial_number[64];
 
   /* miniport data */
   PVOID xvsd;

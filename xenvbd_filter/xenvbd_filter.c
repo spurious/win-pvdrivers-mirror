@@ -25,6 +25,12 @@ DRIVER_INITIALIZE DriverEntry;
 
 static EVT_WDF_DRIVER_UNLOAD XenVbd_EvtDriverUnload;
 static EVT_WDF_DRIVER_DEVICE_ADD XenVbd_EvtDeviceAdd;
+static EVT_WDF_REQUEST_COMPLETION_ROUTINE XenVbd_SendRequestComplete;
+static EVT_WDF_DEVICE_D0_ENTRY XenVbd_EvtDeviceD0Entry;
+static EVT_WDF_DEVICE_D0_EXIT XenVbd_EvtDeviceD0Exit;
+static EVT_WDFDEVICE_WDM_IRP_PREPROCESS XenVbd_EvtDeviceWdmIrpPreprocess_START_DEVICE;
+static EVT_WDF_DPC XenVbd_EvtDpcEvent;
+static IO_COMPLETION_ROUTINE XenVbd_IoCompletion_START_DEVICE;
 
 static VOID XenVbd_DeviceCallback(PVOID context, ULONG callback_type, PVOID value);
 static VOID XenVbd_HandleEventDIRQL(PVOID context);
@@ -173,6 +179,10 @@ XenVbd_SendEvent(WDFDEVICE device) {
   PSRB_IO_CONTROL sic;
 
   status = WdfRequestCreate(WDF_NO_OBJECT_ATTRIBUTES, xvfd->wdf_target, &request);
+  if (status != STATUS_SUCCESS) {
+    /* this is bad - event will be dropped */
+    return;
+  }
 
   buf = ExAllocatePoolWithTag(NonPagedPool, sizeof(SCSI_REQUEST_BLOCK) + sizeof(SRB_IO_CONTROL), XENVBD_POOL_TAG);
   RtlZeroMemory(buf, sizeof(SCSI_REQUEST_BLOCK) + sizeof(SRB_IO_CONTROL));

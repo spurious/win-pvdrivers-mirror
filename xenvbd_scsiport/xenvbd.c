@@ -45,6 +45,14 @@ SxxxPortGetSystemAddress(PVOID device_extension, PSCSI_REQUEST_BLOCK srb, PVOID 
   return STATUS_SUCCESS;
 }
 
+static PHYSICAL_ADDRESS
+SxxxPortGetPhysicalAddress(PVOID device_extension, PSCSI_REQUEST_BLOCK srb, PVOID virtual_address, ULONG *length) {
+  UNREFERENCED_PARAMETER(device_extension);
+  UNREFERENCED_PARAMETER(srb);
+  UNREFERENCED_PARAMETER(length);
+  return MmGetPhysicalAddress(virtual_address);
+}
+
 #define SxxxPortNotification(NotificationType, DeviceExtension, ...) XenVbd_Notification##NotificationType(DeviceExtension, __VA_ARGS__)
 
 static VOID
@@ -333,8 +341,6 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
   if (!RegistryPath) {
     KdPrint((__DRIVER_NAME "     IRQL = %d (if you can read this we aren't in dump mode)\n", KeGetCurrentIrql()));
     dump_mode = TRUE;
-    // TODO: what if hibernate and not dump?
-    XnDumpModeHookDebugPrint();
   }
 
   FUNCTION_ENTER();

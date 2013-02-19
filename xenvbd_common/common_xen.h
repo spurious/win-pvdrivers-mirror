@@ -25,6 +25,7 @@ XenVbd_Connect(PXENVBD_DEVICE_DATA xvdd, BOOLEAN suspend) {
   //BOOLEAN active = FALSE;
   NTSTATUS status;
   PCHAR mode;
+  PCHAR uuid;
   PFN_NUMBER pfn;
 
   FUNCTION_ENTER();
@@ -34,9 +35,8 @@ XenVbd_Connect(PXENVBD_DEVICE_DATA xvdd, BOOLEAN suspend) {
     FUNCTION_EXIT();
     return STATUS_SUCCESS;
   }
-  
-  xvdd->backend_state = XenbusStateUnknown;
   if (!suspend) {
+    xvdd->backend_state = XenbusStateUnknown;
     if ((xvdd->handle = XnOpenDevice(xvdd->pdo, XenVbd_DeviceCallback, xvdd)) == NULL) {
       FUNCTION_MSG("Failed to open\n");
       return STATUS_UNSUCCESSFUL;
@@ -44,6 +44,7 @@ XenVbd_Connect(PXENVBD_DEVICE_DATA xvdd, BOOLEAN suspend) {
   }
   xvdd->sring = (blkif_sring_t *)ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, XENVBD_POOL_TAG);
   if (!xvdd->sring) {
+    FUNCTION_MSG("Failed to allocate sring\n");
     return STATUS_UNSUCCESSFUL;
   }
   pfn = (PFN_NUMBER)(MmGetPhysicalAddress(xvdd->sring).QuadPart >> PAGE_SHIFT);
@@ -129,6 +130,15 @@ XenVbd_Connect(PXENVBD_DEVICE_DATA xvdd, BOOLEAN suspend) {
     FUNCTION_MSG("device-type = %s (This probably won't work!)\n", device_type);
     xvdd->device_type = XENVBD_DEVICETYPE_UNKNOWN;
   }
+
+  status = XnReadString(xvdd->handle, XN_BASE_FRONTEND, "device-type", &uuid);
+  if (status == STATUS_SUCCESS) {
+    RtlStringCbCopyA(xvdd->serial_number, ARRAY_SIZE(xvdd->serial_number), uuid);
+    XnFreeMem(xvdd->handle, uuid);
+  } else {
+    RtlStringCbCopyA(xvdd->serial_number, ARRAY_SIZE(xvdd->serial_number), "        ");
+  }  
+
   XnFreeMem(xvdd->handle, device_type);
   status = XnWriteInt32(xvdd->handle, XN_BASE_FRONTEND, "state", XenbusStateConnected);
 

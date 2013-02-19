@@ -26,6 +26,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 /* Not really necessary but keeps PREfast happy */
 DRIVER_INITIALIZE DriverEntry;
 static IO_WORKITEM_ROUTINE XenVbd_DisconnectWorkItem;
+static IO_WORKITEM_ROUTINE XenVbd_ConnectWorkItem;
 
 static VOID XenVbd_HandleEventDpc(PSTOR_DPC dpc, PVOID DeviceExtension, PVOID arg1, PVOID arg2);
 static VOID XenVbd_HandleEventDIRQL(PVOID DeviceExtension);
@@ -37,6 +38,7 @@ static VOID XenVbd_CompleteDisconnect(PXENVBD_DEVICE_DATA xvdd);
 
 #define SxxxPortNotification(...) StorPortNotification(__VA_ARGS__)
 #define SxxxPortGetSystemAddress(xvdd, srb, system_address) StorPortGetSystemAddress(xvdd, srb, system_address)
+#define SxxxPortGetPhysicalAddress(xvdd, srb, virtual_address, length) StorPortGetPhysicalAddress(xvdd, srb, virtual_address, length)
 
 static BOOLEAN dump_mode = FALSE;
 #define DUMP_MODE_ERROR_LIMIT 64
@@ -89,6 +91,16 @@ XenVbd_DisconnectWorkItem(PDEVICE_OBJECT device_object, PVOID context) {
 }
 
 static VOID
+XenVbd_ConnectWorkItem(PDEVICE_OBJECT device_object, PVOID context) {
+  PXENVBD_DEVICE_DATA xvdd = (PXENVBD_DEVICE_DATA)context;
+
+  UNREFERENCED_PARAMETER(device_object);
+  FUNCTION_ENTER();
+  XenVbd_Connect(xvdd, TRUE);
+  FUNCTION_EXIT();
+}
+
+static VOID
 XenVbd_CompleteDisconnect(PXENVBD_DEVICE_DATA xvdd) {
   IoQueueWorkItem(xvdd->disconnect_workitem, XenVbd_DisconnectWorkItem, DelayedWorkQueue, xvdd);
 }
@@ -106,8 +118,8 @@ XenVbd_VirtualHwStorFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID Bu
   UNREFERENCED_PARAMETER(ArgumentString);
 
   FUNCTION_ENTER(); 
-  KdPrint((__DRIVER_NAME "     IRQL = %d\n", KeGetCurrentIrql()));
-  KdPrint((__DRIVER_NAME "     xvdd = %p\n", xvdd));
+  FUNCTION_MSG("IRQL = %d\n", KeGetCurrentIrql());
+  FUNCTION_MSG("xvdd = %p\n", xvdd);
 
   if (XnGetVersion() != 1) {
     FUNCTION_MSG("Wrong XnGetVersion\n");
@@ -122,23 +134,19 @@ XenVbd_VirtualHwStorFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID Bu
   xvdd->pdo = (PDEVICE_OBJECT)HwContext; // TODO: maybe should get PDO from FDO below? HwContext isn't really documented
   xvdd->fdo = (PDEVICE_OBJECT)BusInformation;
   xvdd->disconnect_workitem = IoAllocateWorkItem(xvdd->fdo);
+  xvdd->connect_workitem = IoAllocateWorkItem(xvdd->fdo);
   xvdd->aligned_buffer_in_use = FALSE;
   /* align the buffer to PAGE_SIZE */
   xvdd->aligned_buffer = (PVOID)((ULONG_PTR)((PUCHAR)xvdd->aligned_buffer_data + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1));
-  KdPrint((__DRIVER_NAME "     aligned_buffer_data = %p\n", xvdd->aligned_buffer_data));
-  KdPrint((__DRIVER_NAME "     aligned_buffer = %p\n", xvdd->aligned_buffer));
+  FUNCTION_MSG("aligned_buffer_data = %p\n", xvdd->aligned_buffer_data);
+  FUNCTION_MSG("aligned_buffer = %p\n", xvdd->aligned_buffer);
 
   ConfigInfo->MaximumTransferLength = 4 * 1024 * 1024; //BLKIF_MAX_SEGMENTS_PER_REQUEST * PAGE_SIZE;
   ConfigInfo->NumberOfPhysicalBreaks = ConfigInfo->MaximumTransferLength >> PAGE_SHIFT; //BLKIF_MAX_SEGMENTS_PER_REQUEST - 1;
   FUNCTION_MSG("ConfigInfo->MaximumTransferLength = %d\n", ConfigInfo->MaximumTransferLength);
   FUNCTION_MSG("ConfigInfo->NumberOfPhysicalBreaks = %d\n", ConfigInfo->NumberOfPhysicalBreaks);
-  if (!dump_mode) {
-    ConfigInfo->VirtualDevice = TRUE;
-    xvdd->aligned_buffer_size = BLKIF_MAX_SEGMENTS_PER_REQUEST * PAGE_SIZE;
-  } else {
-    ConfigInfo->VirtualDevice = FALSE;
-    xvdd->aligned_buffer_size = DUMP_MODE_UNALIGNED_PAGES * PAGE_SIZE;
-  }
+  ConfigInfo->VirtualDevice = TRUE;
+  xvdd->aligned_buffer_size = BLKIF_MAX_SEGMENTS_PER_REQUEST * PAGE_SIZE;
   status = XenVbd_Connect(DeviceExtension, FALSE);
  
   FUNCTION_MSG("ConfigInfo->VirtualDevice = %d\n", ConfigInfo->VirtualDevice);
@@ -177,34 +185,40 @@ XenVbd_HwStorFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInform
   UNREFERENCED_PARAMETER(ArgumentString);
   
   FUNCTION_ENTER();
-  KdPrint((__DRIVER_NAME "     IRQL = %d\n", KeGetCurrentIrql()));
-  KdPrint((__DRIVER_NAME "     xvdd = %p\n", xvdd));
+  FUNCTION_MSG("IRQL = %d\n", KeGetCurrentIrql());
+  FUNCTION_MSG("xvdd = %p\n", xvdd);
+  FUNCTION_MSG("ArgumentString = %s\n", ArgumentString);
 
   memcpy(xvdd, ConfigInfo->Reserved, FIELD_OFFSET(XENVBD_DEVICE_DATA, aligned_buffer_data));
+  if (xvdd->device_state != DEVICE_STATE_ACTIVE) {
+    return SP_RETURN_ERROR;
+  }
+  /* make sure original xvdd is set to DISCONNECTED or resume will not work */
+  ((PXENVBD_DEVICE_DATA)ConfigInfo->Reserved)->device_state = DEVICE_STATE_DISCONNECTED;
   InitializeListHead(&xvdd->srb_list);
   xvdd->aligned_buffer_in_use = FALSE;
   /* align the buffer to PAGE_SIZE */
   xvdd->aligned_buffer = (PVOID)((ULONG_PTR)((PUCHAR)xvdd->aligned_buffer_data + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1));
-  KdPrint((__DRIVER_NAME "     aligned_buffer_data = %p\n", xvdd->aligned_buffer_data));
-  KdPrint((__DRIVER_NAME "     aligned_buffer = %p\n", xvdd->aligned_buffer));
+  xvdd->aligned_buffer_size = DUMP_MODE_UNALIGNED_PAGES * PAGE_SIZE;
+  FUNCTION_MSG("aligned_buffer_data = %p\n", xvdd->aligned_buffer_data);
+  FUNCTION_MSG("aligned_buffer = %p\n", xvdd->aligned_buffer);
 
   ConfigInfo->MaximumTransferLength = 4 * 1024 * 1024;
   ConfigInfo->NumberOfPhysicalBreaks = ConfigInfo->MaximumTransferLength >> PAGE_SHIFT;
   FUNCTION_MSG("ConfigInfo->MaximumTransferLength = %d\n", ConfigInfo->MaximumTransferLength);
   FUNCTION_MSG("ConfigInfo->NumberOfPhysicalBreaks = %d\n", ConfigInfo->NumberOfPhysicalBreaks);
   ConfigInfo->VirtualDevice = FALSE;
-  xvdd->aligned_buffer_size = DUMP_MODE_UNALIGNED_PAGES * PAGE_SIZE;
   ConfigInfo->ScatterGather = TRUE;
   ConfigInfo->Master = TRUE;
   ConfigInfo->CachesData = FALSE;
-  ConfigInfo->MapBuffers = STOR_MAP_ALL_BUFFERS;
-  FUNCTION_MSG("ConfigInfo->NeedPhysicalAddresses = %d\n", ConfigInfo->NeedPhysicalAddresses);
+  ConfigInfo->MapBuffers = STOR_MAP_NON_READ_WRITE_BUFFERS;
   ConfigInfo->SynchronizationModel = StorSynchronizeFullDuplex;
   ConfigInfo->AlignmentMask = 0;
   ConfigInfo->NumberOfBuses = 1;
   ConfigInfo->InitiatorBusId[0] = 1;
   ConfigInfo->MaximumNumberOfLogicalUnits = 1;
   ConfigInfo->MaximumNumberOfTargets = 2;
+  ConfigInfo->VirtualDevice = FALSE;
   if (ConfigInfo->Dma64BitAddresses == SCSI_DMA64_SYSTEM_SUPPORTED) {
     ConfigInfo->Dma64BitAddresses = SCSI_DMA64_MINIPORT_SUPPORTED;
     FUNCTION_MSG("Dma64BitAddresses supported\n");
@@ -226,8 +240,8 @@ XenVbd_HwStorInitialize(PVOID DeviceExtension)
   ULONG i;
   
   FUNCTION_ENTER();
-  KdPrint((__DRIVER_NAME "     IRQL = %d\n", KeGetCurrentIrql()));
-  KdPrint((__DRIVER_NAME "     dump_mode = %d\n", dump_mode));
+  FUNCTION_MSG("IRQL = %d\n", KeGetCurrentIrql());
+  FUNCTION_MSG("dump_mode = %d\n", dump_mode);
   
   xvdd->shadow_free = 0;
   memset(xvdd->shadows, 0, sizeof(blkif_shadow_t) * SHADOW_ENTRIES);
@@ -295,7 +309,7 @@ XenVbd_HwStorStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb)
   STOR_LOCK_HANDLE lock_handle;
 
   //if (dump_mode) FUNCTION_ENTER();
-  //if (dump_mode) KdPrint((__DRIVER_NAME "     srb = %p\n", srb));
+  //if (dump_mode) FUNCTION_MSG("srb = %p\n", srb);
   
   StorPortAcquireSpinLock(DeviceExtension, StartIoLock, NULL, &lock_handle);
   
@@ -333,46 +347,49 @@ XenVbd_HwStorAdapterControl(PVOID DeviceExtension, SCSI_ADAPTER_CONTROL_TYPE Con
   //KIRQL OldIrql;
 
   FUNCTION_ENTER();
-  KdPrint((__DRIVER_NAME "     IRQL = %d\n", KeGetCurrentIrql()));
-  KdPrint((__DRIVER_NAME "     xvdd = %p\n", xvdd));
+  FUNCTION_MSG("IRQL = %d\n", KeGetCurrentIrql());
+  FUNCTION_MSG("ControlType = %d\n", ControlType);
 
-  switch (ControlType)
-  {
+  switch (ControlType) {
   case ScsiQuerySupportedControlTypes:
     SupportedControlTypeList = (PSCSI_SUPPORTED_CONTROL_TYPE_LIST)Parameters;
-    KdPrint((__DRIVER_NAME "     ScsiQuerySupportedControlTypes (Max = %d)\n", SupportedControlTypeList->MaxControlType));
+    FUNCTION_MSG("ScsiQuerySupportedControlTypes (Max = %d)\n", SupportedControlTypeList->MaxControlType);
     SupportedControlTypeList->SupportedTypeList[ScsiQuerySupportedControlTypes] = TRUE;
     SupportedControlTypeList->SupportedTypeList[ScsiStopAdapter] = TRUE;
     SupportedControlTypeList->SupportedTypeList[ScsiRestartAdapter] = TRUE;
     break;
   case ScsiStopAdapter:
-    KdPrint((__DRIVER_NAME "     ScsiStopAdapter\n"));
-    if (xvdd->device_state == DEVICE_STATE_INACTIVE)
-    {
-      KdPrint((__DRIVER_NAME "     inactive - nothing to do\n"));
+    FUNCTION_MSG("ScsiStopAdapter\n");
+    if (xvdd->device_state == DEVICE_STATE_INACTIVE) {
+      FUNCTION_MSG("inactive - nothing to do\n");
       break;
     }
-    NT_ASSERT(IsListEmpty(&xvdd->srb_list));
-    NT_ASSERT(xvdd->shadow_free == SHADOW_ENTRIES);
+    XN_ASSERT(IsListEmpty(&xvdd->srb_list));
+    XN_ASSERT(xvdd->shadow_free == SHADOW_ENTRIES);
+    if (xvdd->power_action != StorPowerActionHibernate) {
+      /* if hibernate then device_state will be set on our behalf in the hibernate FindAdapter */
+      xvdd->device_state = DEVICE_STATE_DISCONNECTED;
+      //XenVbd_Disconnect(??);
+    }
     break;
   case ScsiRestartAdapter:
-    KdPrint((__DRIVER_NAME "     ScsiRestartAdapter\n"));
-    if (xvdd->device_state == DEVICE_STATE_INACTIVE)
-    {
-      KdPrint((__DRIVER_NAME "     inactive - nothing to do\n"));
+    FUNCTION_MSG("ScsiRestartAdapter\n");
+    if (xvdd->device_state == DEVICE_STATE_INACTIVE) {
+      FUNCTION_MSG("inactive - nothing to do\n");
       break;
     }
     /* increase the tag every time we stop/start to track where the gref's came from */
     xvdd->grant_tag++;
+    IoQueueWorkItem(xvdd->connect_workitem, XenVbd_ConnectWorkItem, DelayedWorkQueue, xvdd);
     break;
   case ScsiSetBootConfig:
-    KdPrint((__DRIVER_NAME "     ScsiSetBootConfig\n"));
+    FUNCTION_MSG("ScsiSetBootConfig\n");
     break;
   case ScsiSetRunningConfig:
-    KdPrint((__DRIVER_NAME "     ScsiSetRunningConfig\n"));
+    FUNCTION_MSG("ScsiSetRunningConfig\n");
     break;
   default:
-    KdPrint((__DRIVER_NAME "     UNKNOWN\n"));
+    FUNCTION_MSG("UNKNOWN\n");
     break;
   }
 
@@ -381,34 +398,33 @@ XenVbd_HwStorAdapterControl(PVOID DeviceExtension, SCSI_ADAPTER_CONTROL_TYPE Con
   return Status;
 }
 
+//BOOLEAN dump_mode_hooked = FALSE;
+
 NTSTATUS
 DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
   ULONG status;
   VIRTUAL_HW_INITIALIZATION_DATA VHwInitializationData;
   HW_INITIALIZATION_DATA HwInitializationData;
-  
-  if (!RegistryPath) {
-    dump_mode = TRUE;
-    // what if hibernate and not dump?
-    XnDumpModeHookDebugPrint();
-  }
 
   FUNCTION_ENTER();
-  KdPrint((__DRIVER_NAME "     IRQL = %d\n", KeGetCurrentIrql()));
-  KdPrint((__DRIVER_NAME "     DriverObject = %p, RegistryPath = %p\n", DriverObject, RegistryPath));
+  FUNCTION_MSG("IRQL = %d\n", KeGetCurrentIrql());
+  FUNCTION_MSG("DriverObject = %p, RegistryPath = %p\n", DriverObject, RegistryPath);
 
   /* RegistryPath == NULL when we are invoked as a crash dump driver */
-  
+  if (!RegistryPath) {
+    dump_mode = TRUE;
+    XnPrintDump();
+  }
+
   if (!dump_mode) {
     RtlZeroMemory(&VHwInitializationData, sizeof(VIRTUAL_HW_INITIALIZATION_DATA));
     VHwInitializationData.HwInitializationDataSize = sizeof(VIRTUAL_HW_INITIALIZATION_DATA);
-    VHwInitializationData.AdapterInterfaceType = Internal; //PNPBus; /* maybe should be internal? */
+    VHwInitializationData.AdapterInterfaceType = Internal;
     VHwInitializationData.DeviceExtensionSize = FIELD_OFFSET(XENVBD_DEVICE_DATA, aligned_buffer_data) + UNALIGNED_BUFFER_DATA_SIZE;
     VHwInitializationData.SpecificLuExtensionSize = 0;
     VHwInitializationData.SrbExtensionSize = sizeof(srb_list_entry_t);
     VHwInitializationData.NumberOfAccessRanges = 0;
     VHwInitializationData.MapBuffers = STOR_MAP_ALL_BUFFERS;
-    //VHwInitializationData.NeedPhysicalAddresses  = TRUE;
     VHwInitializationData.TaggedQueuing = TRUE;
     VHwInitializationData.AutoRequestSense = TRUE;
     VHwInitializationData.MultipleRequestPerLu = TRUE;
@@ -423,7 +439,7 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
   } else {
     RtlZeroMemory(&HwInitializationData, sizeof(HW_INITIALIZATION_DATA));
     HwInitializationData.HwInitializationDataSize = sizeof(HW_INITIALIZATION_DATA);
-    HwInitializationData.AdapterInterfaceType = Internal; //PNPBus; /* not Internal */
+    HwInitializationData.AdapterInterfaceType = Internal;
     HwInitializationData.DeviceExtensionSize = FIELD_OFFSET(XENVBD_DEVICE_DATA, aligned_buffer_data) + UNALIGNED_BUFFER_DATA_SIZE_DUMP_MODE;
     HwInitializationData.SrbExtensionSize = sizeof(srb_list_entry_t);
     HwInitializationData.NumberOfAccessRanges = 0;
