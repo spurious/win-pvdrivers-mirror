@@ -172,10 +172,10 @@ the wrong width is used with the wrong defined port
 #define QEMU_UNPLUG_ALL_NICS 2
 #define QEMU_UNPLUG_AUX_IDE_DISKS 4
 
-#define FUNCTION_ENTER()       KdPrint((__DRIVER_NAME " --> %s\n", __FUNCTION__))
-#define FUNCTION_EXIT()        KdPrint((__DRIVER_NAME " <-- %s\n", __FUNCTION__))
-#define FUNCTION_EXIT_STATUS(_status) KdPrint((__DRIVER_NAME " <-- %s, status = %08x\n", __FUNCTION__, _status))
-#define FUNCTION_MSG(...) KdPrint((__DRIVER_NAME "     " __VA_ARGS__))
+#define FUNCTION_ENTER()       XnDebugPrint(__DRIVER_NAME " --> %s\n", __FUNCTION__)
+#define FUNCTION_EXIT()        XnDebugPrint(__DRIVER_NAME " <-- %s\n", __FUNCTION__)
+#define FUNCTION_EXIT_STATUS(_status) XnDebugPrint(__DRIVER_NAME " <-- %s, status = %08x\n", __FUNCTION__, _status)
+#define FUNCTION_MSG(...) XnDebugPrint(__DRIVER_NAME "     " __VA_ARGS__)
 
 #define INVALID_GRANT_REF 0xFFFFFFFF
 
@@ -266,7 +266,24 @@ XnFreeMem(XN_HANDLE handle, PVOID Ptr) {
 }
 
 
+//VOID
+//XnDumpModeHookDebugPrint();
+
+
+NTSTATUS
+XnDebugPrint(PCHAR format, ...);
+
 VOID
-XnDumpModeHookDebugPrint();
+XnPrintDump();
+
+#if DBG
+#define XN_ASSERT(expr) \
+if (!(expr)) { \
+  XnDebugPrint("ASSERT(%s) %s:%d\n", #expr, __FILE__, __LINE__); \
+  ASSERT(expr); \
+}
+#else
+#define XN_ASSERT(expr)
+#endif
 
 #endif
