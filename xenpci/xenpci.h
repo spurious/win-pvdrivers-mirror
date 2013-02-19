@@ -188,7 +188,7 @@ typedef struct {
   PKTHREAD balloon_thread;
   KEVENT balloon_event;
   BOOLEAN balloon_shutdown;
-  ULONG initial_memory_kb;
+  //ULONG initial_memory_kb;
   ULONG current_memory_kb;
   ULONG target_memory_kb;
   
@@ -377,9 +377,16 @@ VOID XenPci_HighSync(PXENPCI_HIGHSYNC_FUNCTION function0, PXENPCI_HIGHSYNC_FUNCT
 
 VOID XenPci_PatchKernel(PXENPCI_DEVICE_DATA xpdd, PVOID base, ULONG length);
 
-NTSTATUS XenPci_HookDbgPrint();
-NTSTATUS XenPci_UnHookDbgPrint();
-VOID XenPci_DumpModeHookDebugPrint();
+//NTSTATUS XenPci_HookDbgPrint();
+//NTSTATUS XenPci_ReHookDbgPrint();
+//NTSTATUS XenPci_UnHookDbgPrint();
+//VOID XenPci_DumpModeHookDebugPrint();
+#include <stdlib.h>
+
+NTSTATUS
+XenPci_DebugPrintV(PCHAR format, va_list args);
+NTSTATUS
+XenPci_DebugPrint(PCHAR format, ...);
 
 struct xsd_sockmsg *XenBus_Raw(PXENPCI_DEVICE_DATA xpdd, struct xsd_sockmsg *msg);
 char *XenBus_Read(PVOID Context, xenbus_transaction_t xbt, char *path, char **value);

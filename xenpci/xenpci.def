@@ -28,4 +28,5 @@ EXPORTS
  XnReadInt64
  XnWriteInt64
 
- XnDumpModeHookDebugPrint
+ XnDebugPrint
+ XnPrintDump

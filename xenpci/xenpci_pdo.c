@@ -31,8 +31,6 @@ static EVT_WDF_DEVICE_D0_EXIT XenPciPdo_EvtDeviceD0Exit;
 static EVT_WDF_DEVICE_USAGE_NOTIFICATION XenPciPdo_EvtDeviceUsageNotification;
 static EVT_WDF_DEVICE_PNP_STATE_CHANGE_NOTIFICATION XenPci_EvtDevicePnpStateChange;
 
-
-      
 /*
 Called at PASSIVE_LEVEL(?)
 Called during restore
@@ -148,7 +146,7 @@ NTSTATUS
 XenPciPdo_EvtDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previous_state) {
   NTSTATUS status = STATUS_SUCCESS;
   PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  //PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
+  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
   CHAR path[128];
   
   FUNCTION_ENTER();
@@ -189,6 +187,12 @@ XenPciPdo_EvtDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previous_sta
     return status;
   }
 
+  if (previous_state == WdfPowerDevicePrepareForHibernation && xppdd->device_callback) {
+    FUNCTION_MSG("Restoring watch %s\n", xppdd->device);
+    RtlStringCbPrintfA(path, ARRAY_SIZE(path), "%s/state", xppdd->backend_path);
+    XenBus_AddWatch(xpdd, XBT_NIL, path, XenPci_BackendStateCallback, xppdd);
+  }
+
   if (!NT_SUCCESS(status)) {
     RtlStringCbPrintfA(path, ARRAY_SIZE(path), "%s/state", xppdd->backend_path);
     //XenBus_RemWatch(xpdd, XBT_NIL, path, XenPci_BackendStateHandler, device);
@@ -206,7 +210,7 @@ NTSTATUS
 XenPciPdo_EvtDeviceD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE target_state) {
   NTSTATUS status = STATUS_SUCCESS;
   PXENPCI_PDO_DEVICE_DATA xppdd = GetXppdd(device);
-  //PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
+  PXENPCI_DEVICE_DATA xpdd = GetXpdd(xppdd->wdf_device_bus_fdo);
   char path[128];
   
   UNREFERENCED_PARAMETER(device);
@@ -250,9 +254,12 @@ XenPciPdo_EvtDeviceD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE target_state)
   }
   
   /* Remove watch on backend state */
-  RtlStringCbPrintfA(path, ARRAY_SIZE(path), "%s/state", xppdd->backend_path);
-  //XenBus_RemWatch(xpdd, XBT_NIL, path, XenPci_BackendStateHandler, device);
-  
+  /* even if hibernate */
+  if (xppdd->device_callback) {
+    FUNCTION_MSG("Removing watch %s\n", xppdd->device);
+    RtlStringCbPrintfA(path, ARRAY_SIZE(path), "%s/state", xppdd->backend_path);
+    XenBus_RemWatch(xpdd, XBT_NIL, path, XenPci_BackendStateCallback, xppdd);
+  }
   FUNCTION_EXIT();
   
   return status;

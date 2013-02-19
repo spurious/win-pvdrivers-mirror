@@ -29,7 +29,7 @@ GntTbl_PutRef(PVOID Context, grant_ref_t ref, ULONG tag)
 #if DBG
   if (xpdd->gnttbl_tag[ref].tag != tag)
     KdPrint((__DRIVER_NAME "     Grant Entry %d for %.4s doesn't match %.4s\n", ref, (PUCHAR)&tag, (PUCHAR)&xpdd->gnttbl_tag[ref].tag));
-  NT_ASSERT(xpdd->gnttbl_tag[ref].tag == tag);
+  XN_ASSERT(xpdd->gnttbl_tag[ref].tag == tag);
   xpdd->gnttbl_tag[ref].tag = 0;
   xpdd->gnttbl_tag[ref].generation = (ULONG)-1;
 #endif
@@ -54,7 +54,7 @@ GntTbl_GetRef(PVOID Context, ULONG tag)
 #if DBG
   if (xpdd->gnttbl_tag[ref].tag)
     KdPrint((__DRIVER_NAME "     Grant Entry %d for %.4s in use by %.4s\n", ref, (PUCHAR)&tag, (PUCHAR)&xpdd->gnttbl_tag[ref].tag));
-  NT_ASSERT(!xpdd->gnttbl_tag[ref].tag);
+  XN_ASSERT(!xpdd->gnttbl_tag[ref].tag);
   xpdd->gnttbl_tag[ref].generation = xpdd->gnttbl_generation;
   xpdd->gnttbl_tag[ref].tag = tag;
 #endif
@@ -104,7 +104,7 @@ GntTbl_GrantAccess(
   if (ref == INVALID_GRANT_REF)
     return ref;
 
-  NT_ASSERT(xpdd->gnttbl_tag[ref].tag == tag);
+  XN_ASSERT(xpdd->gnttbl_tag[ref].tag == tag);
   
   xpdd->gnttbl_table[ref].frame = frame;
   xpdd->gnttbl_table[ref].domid = domid;
@@ -117,7 +117,7 @@ GntTbl_GrantAccess(
     KdPrint((__DRIVER_NAME "     Grant Entry %d for %.4s still in use\n", ref, (PUCHAR)&tag));
 #endif
   }
-  NT_ASSERT(!xpdd->gnttbl_table[ref].flags);
+  XN_ASSERT(!xpdd->gnttbl_table[ref].flags);
 
   KeMemoryBarrier();
   readonly *= GTF_readonly;
@@ -136,8 +136,8 @@ GntTbl_EndAccess(
   PXENPCI_DEVICE_DATA xpdd = Context;
   unsigned short flags, nflags;
 
-  NT_ASSERT(ref != INVALID_GRANT_REF);
-  NT_ASSERT(xpdd->gnttbl_tag[ref].tag == tag);
+  XN_ASSERT(ref != INVALID_GRANT_REF);
+  XN_ASSERT(xpdd->gnttbl_tag[ref].tag == tag);
   
   nflags = xpdd->gnttbl_table[ref].flags;
   do {
@@ -178,7 +178,7 @@ GntTbl_Init(PXENPCI_DEVICE_DATA xpdd)
   int i;
   int grant_entries;
 
-  NT_ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
+  XN_ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
   
   FUNCTION_ENTER();
   
@@ -193,12 +193,12 @@ GntTbl_Init(PXENPCI_DEVICE_DATA xpdd)
   xpdd->gnttbl_generation = 0;
   #endif
   xpdd->gnttbl_table_copy = ExAllocatePoolWithTag(NonPagedPool, xpdd->grant_frames * PAGE_SIZE, XENPCI_POOL_TAG);
-  NT_ASSERT(xpdd->gnttbl_table_copy); // lazy
+  XN_ASSERT(xpdd->gnttbl_table_copy); // lazy
   xpdd->gnttbl_table = ExAllocatePoolWithTag(NonPagedPool, xpdd->grant_frames * PAGE_SIZE, XENPCI_POOL_TAG);
-  NT_ASSERT(xpdd->gnttbl_table); // lazy
+  XN_ASSERT(xpdd->gnttbl_table); // lazy
   /* dom0 crashes if we allocate the wrong amount of memory here! */
   xpdd->gnttbl_mdl = IoAllocateMdl(xpdd->gnttbl_table, xpdd->grant_frames * PAGE_SIZE, FALSE, FALSE, NULL);
-  NT_ASSERT(xpdd->gnttbl_mdl); // lazy
+  XN_ASSERT(xpdd->gnttbl_mdl); // lazy
   MmBuildMdlForNonPagedPool(xpdd->gnttbl_mdl);
 
   /* make some holes for the grant pages to fill in */
@@ -332,7 +332,7 @@ GntTbl_Resume(PXENPCI_DEVICE_DATA xpdd)
 
   new_grant_frames = GntTbl_QueryMaxFrames(xpdd);
   KdPrint((__DRIVER_NAME "     new_grant_frames = %d\n", new_grant_frames));
-  NT_ASSERT(new_grant_frames >= xpdd->grant_frames); // lazy
+  XN_ASSERT(new_grant_frames >= xpdd->grant_frames); // lazy
   result = GntTbl_Map(xpdd, 0, xpdd->grant_frames - 1);
   KdPrint((__DRIVER_NAME "     GntTbl_Map result = %d\n", result));
   memcpy(xpdd->gnttbl_table, xpdd->gnttbl_table_copy, xpdd->grant_frames * PAGE_SIZE);

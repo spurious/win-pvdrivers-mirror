@@ -103,6 +103,7 @@ XenPci_EvtDeviceAdd_XenPci(WDFDRIVER driver, PWDFDEVICE_INIT device_init)
   WDFKEY param_key;
   DECLARE_CONST_UNICODE_STRING(veto_devices_name, L"veto_devices");
   WDF_DEVICE_POWER_CAPABILITIES power_capabilities;
+  PPHYSICAL_MEMORY_RANGE pmr_head, pmr;
   int i;
   
   UNREFERENCED_PARAMETER(driver);
@@ -138,8 +139,7 @@ XenPci_EvtDeviceAdd_XenPci(WDFDRIVER driver, PWDFDEVICE_INIT device_init)
   
   WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&device_attributes, XENPCI_DEVICE_DATA);
   status = WdfDeviceCreate(&device_init, &device_attributes, &device);
-  if (!NT_SUCCESS(status))
-  {
+  if (!NT_SUCCESS(status)) {
     KdPrint(("Error creating device %08x\n", status));
     return status;
   }
@@ -148,26 +148,33 @@ XenPci_EvtDeviceAdd_XenPci(WDFDRIVER driver, PWDFDEVICE_INIT device_init)
   xpdd->wdf_device = device;
   xpdd->child_list = WdfFdoGetDefaultChildList(device);
 
+  /* this is not a documented function */
+  KeInitializeEvent(&xpdd->balloon_event, SynchronizationEvent, FALSE);
+  pmr_head = MmGetPhysicalMemoryRanges();
+  xpdd->current_memory_kb = 0;
+  for (pmr = pmr_head; !(pmr->BaseAddress.QuadPart == 0 && pmr->NumberOfBytes.QuadPart == 0); pmr++) {
+    xpdd->current_memory_kb += (ULONG)(pmr->NumberOfBytes.QuadPart / 1024);
+  }
+  FUNCTION_MSG("current_memory_kb = %d\n", xpdd->current_memory_kb);
+  /* round to MB increments because that is what balloon deals in */
+  xpdd->current_memory_kb = (xpdd->current_memory_kb + 0x1FF) & 0xFFFFFC00;
+  FUNCTION_MSG("current_memory_kb rounded to %d\n", xpdd->current_memory_kb);
+
   ExInitializeFastMutex(&xpdd->suspend_mutex);
   WdfCollectionCreate(WDF_NO_OBJECT_ATTRIBUTES, &veto_devices);
   status = WdfDriverOpenParametersRegistryKey(driver, KEY_QUERY_VALUE, WDF_NO_OBJECT_ATTRIBUTES, &param_key);
-  if (NT_SUCCESS(status))
-  {
+  if (NT_SUCCESS(status)) {
     status = WdfRegistryQueryMultiString(param_key, &veto_devices_name, WDF_NO_OBJECT_ATTRIBUTES, veto_devices);
-    if (!NT_SUCCESS(status))
-    {
+    if (!NT_SUCCESS(status)) {
       KdPrint(("Error reading parameters/veto_devices value %08x\n", status));
     }
     WdfRegistryClose(param_key);
-  }
-  else
-  {
+  } else {
     KdPrint(("Error opening parameters key %08x\n", status));
   }
 
   InitializeListHead(&xpdd->veto_list);
-  for (i = 0; i < (int)WdfCollectionGetCount(veto_devices); i++)
-  {
+  for (i = 0; i < (int)WdfCollectionGetCount(veto_devices); i++) {
     WDFOBJECT ws;
     UNICODE_STRING val;
     ANSI_STRING s;
@@ -259,8 +266,7 @@ XenHide_EvtDevicePrepareHardware(WDFDEVICE device, WDFCMRESLIST resources_raw, W
 }
 
 static BOOLEAN
-XenPci_IdSuffixMatches(PWDFDEVICE_INIT device_init, PWCHAR matching_id)
-{
+XenPci_IdSuffixMatches(PWDFDEVICE_INIT device_init, PWCHAR matching_id) {
   NTSTATUS status;
   WDFMEMORY memory;
   ULONG remaining;
@@ -280,33 +286,25 @@ XenPci_IdSuffixMatches(PWDFDEVICE_INIT device_init, PWCHAR matching_id)
       continue;
     ids = WdfMemoryGetBuffer(memory, &ids_length);
 
-    if (!NT_SUCCESS(status))
-    {
-//      KdPrint((__DRIVER_NAME "     i = %d, status = %x, ids_length = %d\n", i, status, ids_length));
+    if (!NT_SUCCESS(status)) {
       continue;
     }
     
     remaining = (ULONG)ids_length / 2;
-    for (ptr = ids; *ptr != 0; ptr += string_length + 1)
-    {
+    for (ptr = ids; *ptr != 0; ptr += string_length + 1) {
       RtlStringCchLengthW(ptr, remaining, &string_length);
       remaining -= (ULONG)string_length + 1;
-      if (string_length >= wcslen(matching_id))
-      {
+      if (string_length >= wcslen(matching_id)) {
         ptr += string_length - wcslen(matching_id);
         string_length = wcslen(matching_id);
       }
-//      KdPrint((__DRIVER_NAME "     Comparing '%S' and '%S'\n", ptr, matching_id));
-      if (wcscmp(ptr, matching_id) == 0)
-      {
-        //KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ " (Match)\n"));
+      if (wcscmp(ptr, matching_id) == 0) {
         WdfObjectDelete(memory);
         return TRUE;
       }
     }
     WdfObjectDelete(memory);
   }
-//  KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ " (No match)\n"));
   return FALSE;
 }
 
@@ -395,8 +393,7 @@ ULONG tpr_patch_requested;
 extern PULONG InitSafeBootMode;
 
 VOID
-XenPci_HideQemuDevices()
-{
+XenPci_HideQemuDevices() {
   #pragma warning(suppress:28138)
   WRITE_PORT_USHORT(XEN_IOPORT_DEVICE_MASK, (USHORT)qemu_hide_flags_value); //QEMU_UNPLUG_ALL_IDE_DISKS|QEMU_UNPLUG_ALL_NICS);
   KdPrint((__DRIVER_NAME "     Disabled qemu devices %02x\n", qemu_hide_flags_value));
@@ -406,13 +403,11 @@ static BOOLEAN
 XenPci_CheckHideQemuDevices()
 {
   #pragma warning(suppress:28138)
-  if (READ_PORT_USHORT(XEN_IOPORT_MAGIC) == 0x49d2)
-  {
+  if (READ_PORT_USHORT(XEN_IOPORT_MAGIC) == 0x49d2) {
     #pragma warning(suppress:28138)
     qemu_protocol_version = READ_PORT_UCHAR(XEN_IOPORT_VERSION);
     KdPrint((__DRIVER_NAME "     Version = %d\n", qemu_protocol_version));
-    switch(qemu_protocol_version)
-    {
+    switch(qemu_protocol_version) {
     case 1:
       #pragma warning(suppress:28138)
       WRITE_PORT_USHORT(XEN_IOPORT_PRODUCT, XEN_PV_PRODUCT_NUMBER);
@@ -562,126 +557,9 @@ XenPci_EvtDriverUnload(WDFDRIVER driver)
 {
   UNREFERENCED_PARAMETER(driver);
   
-  #if DBG
-  XenPci_UnHookDbgPrint();
-  #endif  
-}
-
-/* we need to balloon down very early on in the case of PoD, so things get a little messy */
-static PMDL
-XenPci_InitialBalloonDown()
-{
-  PVOID hypercall_stubs;
-  domid_t domid = DOMID_SELF;
-  ULONG maximum_reservation;
-  ULONG current_reservation;
-  ULONG extra_kb;
-  ULONG ret;
-  struct xen_memory_reservation reservation;
-  xen_pfn_t *pfns;
-  PMDL head = NULL;
-  PMDL mdl;
-  int i, j;
-  ULONG curr_pfns_offset;
-  PHYSICAL_ADDRESS alloc_low;
-  PHYSICAL_ADDRESS alloc_high;
-  PHYSICAL_ADDRESS alloc_skip;
-
-  FUNCTION_ENTER();
-  
-  hypercall_stubs = hvm_get_hypercall_stubs();
-  if (!hypercall_stubs)
-  {
-    KdPrint((__DRIVER_NAME "     Failed to copy hypercall stubs. Maybe not running under Xen?\n"));
-    FUNCTION_EXIT();
-    return NULL;
-  }
-  if (xen_version_major < 4)
-  {
-    FUNCTION_MSG("No support for PoD. Cannot do initial balloon down.\n");
-    FUNCTION_MSG("Expect a crash if maxmem is set much larger than memory.\n");
-    FUNCTION_EXIT();
-    return NULL;
-  }
-  ret = _HYPERVISOR_memory_op(hypercall_stubs, XENMEM_maximum_reservation, &domid);
-  KdPrint((__DRIVER_NAME "     XENMEM_maximum_reservation = %d\n", ret));
-  maximum_reservation = ret;
-  ret = _HYPERVISOR_memory_op(hypercall_stubs, XENMEM_current_reservation, &domid);
-  KdPrint((__DRIVER_NAME "     XENMEM_current_reservation = %d\n", ret));
-  current_reservation = ret;
-
-  extra_kb = (maximum_reservation - current_reservation) << 2;
-
-  alloc_low.QuadPart = 0;
-  alloc_high.QuadPart = 0xFFFFFFFFFFFFFFFFULL;
-  alloc_skip.QuadPart = PAGE_SIZE;
-
-  KdPrint((__DRIVER_NAME "     Trying to give %d KB (%d MB) to Xen\n", extra_kb, extra_kb >> 10));
-
-  /* this code is mostly duplicated from the actual balloon thread... too hard to reuse */
-  pfns = ExAllocatePoolWithTag(NonPagedPool, max(BALLOON_UNIT_PAGES, (64 << 8)) * sizeof(xen_pfn_t), XENPCI_POOL_TAG);
-  if (!pfns) {
-      /* If we can't balloon down then we are going to crash in strange ways later. Better to bug check now. */
-      KdPrint((__DRIVER_NAME "     Initial Balloon Down failed - no memory for pfn list\n"));
-      #pragma warning(suppress:28159)
-      KeBugCheckEx(('X' << 16)|('E' << 8)|('N'), 0x00000003, 0x00000000, 0x00000000, 0x00000000);
-  }
-  curr_pfns_offset = 0;
-  /* this makes sure we balloon up to the next multiple of BALLOON_UNITS_KB */
-  for (j = 0; j < (int)extra_kb; j += BALLOON_UNITS_KB)
-  {
-    #if (NTDDI_VERSION >= NTDDI_WS03SP1)
-    /* our contract says that we must zero pages before returning to xen, so we can't use MM_DONT_ZERO_ALLOCATION */
-    mdl = MmAllocatePagesForMdlEx(alloc_low, alloc_high, alloc_skip, BALLOON_UNITS_KB * 1024, MmCached, 0);
-    #else
-    mdl = MmAllocatePagesForMdl(alloc_low, alloc_high, alloc_skip, BALLOON_UNITS_KB * 1024);
-    #endif
-    if (!mdl || MmGetMdlByteCount(mdl) != BALLOON_UNITS_KB * 1024)
-    {
-      /* this should actually never happen. If we can't allocate the memory it means windows is using it, and if it was using it we would have crashed already... */
-      KdPrint((__DRIVER_NAME "     Initial Balloon Down failed\n"));
-      #pragma warning(suppress:28159)
-      KeBugCheckEx(('X' << 16)|('E' << 8)|('N'), 0x00000002, extra_kb, j, 0x00000000);
-    }
-    else
-    {
-      /* sizeof(xen_pfn_t) may not be the same as PPFN_NUMBER */
-      for (i = 0; i < BALLOON_UNIT_PAGES; i++)
-      {
-        pfns[curr_pfns_offset] = (xen_pfn_t)(MmGetMdlPfnArray(mdl)[i]);
-        curr_pfns_offset++;
-      }
-      if (curr_pfns_offset == (ULONG)max(BALLOON_UNIT_PAGES, (64 << 8)) || j + BALLOON_UNITS_KB > (int)extra_kb)
-      {
-        reservation.address_bits = 0;
-        reservation.extent_order = 0;
-        reservation.domid = DOMID_SELF;
-        reservation.nr_extents = curr_pfns_offset;
-        #pragma warning(disable: 4127) /* conditional expression is constant */
-        set_xen_guest_handle(reservation.extent_start, pfns);
-        ret = _HYPERVISOR_memory_op(hypercall_stubs, XENMEM_decrease_reservation, &reservation);
-        if (ret != curr_pfns_offset)
-          FUNCTION_MSG("only decreased %d of %d pages\n", ret, curr_pfns_offset);
-        curr_pfns_offset = 0;
-      }
-      if (head)
-      {
-        mdl->Next = head;
-        head = mdl;
-      }
-      else
-      {
-        head = mdl;
-      }
-    }
-//KdPrint((__DRIVER_NAME "     C\n"));
-  }
-  ExFreePoolWithTag(pfns, XENPCI_POOL_TAG);
-  hvm_free_hypercall_stubs(hypercall_stubs);
-  
-  FUNCTION_EXIT();
-  
-  return head;
+//  #if DBG
+//  XenPci_UnHookDbgPrint();
+//  #endif  
 }
 
 #if (NTDDI_VERSION >= NTDDI_WS03SP1)  
@@ -742,13 +620,6 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 
   FUNCTION_MSG(__DRIVER_NAME " " VER_FILEVERSION_STR "\n");
 
-  #if DBG
-  XenPci_HookDbgPrint();
-  #endif
-
-  NT_ASSERT(!balloon_mdl_head);
-  balloon_mdl_head = XenPci_InitialBalloonDown();
-
 #if (NTDDI_VERSION >= NTDDI_WS03SP1)
   status = KeInitializeCrashDumpHeader(DUMP_TYPE_FULL, 0, NULL, 0, &dump_header_size);
   /* try and allocate contiguous memory as low as possible */
@@ -756,7 +627,11 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
   dump_header_mem_max.QuadPart = 0xFFFFF;
   while (!dump_header && dump_header_mem_max.QuadPart != 0xFFFFFFFFFFFFFFFF) {
     dump_header = MmAllocateContiguousMemory(DUMP_HEADER_PREFIX_SIZE + dump_header_size + DUMP_HEADER_SUFFIX_SIZE, dump_header_mem_max);
-    dump_header_mem_max.QuadPart = (dump_header_mem_max.QuadPart << 8) | 0xF;
+    if (dump_header) {
+      FUNCTION_MSG("Allocated crash dump header < 0x%016I64x\n", dump_header_mem_max.QuadPart);
+      break;
+    }
+    dump_header_mem_max.QuadPart = (dump_header_mem_max.QuadPart << 4) | 0xF;
   }
   if (dump_header) {
     status = KeInitializeCrashDumpHeader(DUMP_TYPE_FULL, 0, dump_header + DUMP_HEADER_PREFIX_SIZE, dump_header_size, &dump_header_size);
@@ -779,28 +654,25 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
   WDF_DRIVER_CONFIG_INIT(&config, XenPci_EvtDeviceAdd);
   config.EvtDriverUnload = XenPci_EvtDriverUnload;
   status = WdfDriverCreate(DriverObject, RegistryPath, WDF_NO_OBJECT_ATTRIBUTES, &config, &driver);
-  if (!NT_SUCCESS(status))
-  {
+  if (!NT_SUCCESS(status)) {
     KdPrint((__DRIVER_NAME "     WdfDriverCreate failed with status 0x%x\n", status));
     FUNCTION_EXIT();
-    #if DBG
-    XenPci_UnHookDbgPrint();
-    #endif
+    //#if DBG
+    //XenPci_UnHookDbgPrint();
+    //#endif
     return status;
   }
   WDF_OBJECT_ATTRIBUTES_INIT(&parent_attributes);
   parent_attributes.ParentObject = driver;
   
   status = WdfDriverOpenParametersRegistryKey(driver, KEY_QUERY_VALUE, &parent_attributes, &param_key);
-  if (!NT_SUCCESS(status))
-  {
+  if (!NT_SUCCESS(status)) {
     KdPrint(("Error opening parameters key %08x\n", status));
     goto error;
   }
 
   status = AuxKlibInitialize();
-  if(!NT_SUCCESS(status))
-  {
+  if(!NT_SUCCESS(status)) {
     KdPrint((__DRIVER_NAME "     AuxKlibInitialize failed %08x\n", status));
     goto error;
   }
@@ -809,8 +681,7 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 
   RtlInitUnicodeString(&system_start_options, L"failed to read");
   status = WdfRegistryOpenKey(NULL, &control_key_name, GENERIC_READ, &parent_attributes, &control_key);
-  if (NT_SUCCESS(status))
-  {
+  if (NT_SUCCESS(status)) {
     status = WdfStringCreate(NULL, &parent_attributes, &wdf_system_start_options);
     status = WdfRegistryQueryString(control_key, &system_start_options_name, wdf_system_start_options);
     if (NT_SUCCESS(status))
@@ -822,8 +693,7 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
   
   always_patch = 0;
   WdfRegistryQueryULong(param_key, &txt_always_patch_name, &always_patch);
-  if (always_patch || (system_start_options.Buffer && wcsstr(system_start_options.Buffer, L"PATCHTPR")))
-  {
+  if (always_patch || (system_start_options.Buffer && wcsstr(system_start_options.Buffer, L"PATCHTPR"))) {
     DECLARE_CONST_UNICODE_STRING(verifier_key_name, L"\\Registry\\Machine\\System\\CurrentControlSet\\Control\\Session Manager\\Memory Management");
     WDFKEY memory_key;
     ULONG verifier_value;
@@ -879,9 +749,6 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
   return STATUS_SUCCESS;
 
 error:
-  #if DBG
-  XenPci_UnHookDbgPrint();
-  #endif
   KdPrint(("Failed, returning %08x\n", status));
   FUNCTION_EXIT();
   return status;

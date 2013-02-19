@@ -18,6 +18,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
 #include "xenpci.h"
+#include <aux_klib.h>
 
 ULONG
 XnGetVersion() {
@@ -378,8 +379,25 @@ XnGetValue(XN_HANDLE handle, ULONG value_type, PVOID value) {
   }
 }
 
-/* called by storage devices in dump mode to re-hook DebugPrint */
+NTSTATUS
+XnDebugPrint(PCHAR format, ...) {
+  NTSTATUS status;
+  va_list args;
+  
+  va_start(args, format);
+  status = XenPci_DebugPrintV(format, args);
+  va_end(args);
+
+  return status;
+}
+
 VOID
-XnDumpModeHookDebugPrint() {
-  XenPci_DumpModeHookDebugPrint();
+XnPrintDump() {
+  KBUGCHECK_DATA bugcheck_data;
+  
+  bugcheck_data.BugCheckDataSize  = sizeof(bugcheck_data);
+  AuxKlibGetBugCheckData(&bugcheck_data);
+  if (bugcheck_data.BugCheckCode != 0) {
+    FUNCTION_MSG("Bug check 0x%08x (0x%p, 0x%p, 0x%p, 0x%p)\n", bugcheck_data.BugCheckCode, bugcheck_data.Parameter1, bugcheck_data.Parameter2, bugcheck_data.Parameter3, bugcheck_data.Parameter4);
+  }
 }

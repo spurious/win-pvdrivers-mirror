@@ -80,7 +80,7 @@ static void xb_write(
   
   //FUNCTION_ENTER();
 
-  ASSERT(len <= XENSTORE_RING_SIZE);
+  XN_ASSERT(len <= XENSTORE_RING_SIZE);
   prod = xpdd->xen_store_interface->req_prod;
   ptr = data;
   remaining = len;
@@ -175,7 +175,7 @@ XenBus_Read(
 
   //KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
 
-  ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
+  XN_ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
 
   rep = xenbus_format_msg_reply(xpdd, XS_READ, xbt, req, ARRAY_SIZE(req));
   msg = errmsg(rep);
@@ -210,7 +210,7 @@ XenBus_Write(
   struct xsd_sockmsg *rep;
   char *msg;
 
-  ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
+  XN_ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
 
   rep = xenbus_format_msg_reply(xpdd, XS_WRITE, xbt, req, ARRAY_SIZE(req));
   msg = errmsg(rep);
@@ -301,7 +301,7 @@ XenBus_Dpc(PVOID ServiceContext)
     }
 
     msg_len = min(rsp_prod - xpdd->xen_store_interface->rsp_cons, sizeof(xsd_sockmsg_t) + xpdd->xb_msg->len - xpdd->xb_msg_offset);
-    ASSERT(xpdd->xb_msg_offset + msg_len <= sizeof(xsd_sockmsg_t) + xpdd->xb_msg->len);
+    XN_ASSERT(xpdd->xb_msg_offset + msg_len <= sizeof(xsd_sockmsg_t) + xpdd->xb_msg->len);
     memcpy_from_ring(xpdd->xen_store_interface->rsp,
       (PUCHAR)xpdd->xb_msg + xpdd->xb_msg_offset,
       MASK_XENSTORE_IDX(xpdd->xen_store_interface->rsp_cons),
@@ -319,7 +319,7 @@ XenBus_Dpc(PVOID ServiceContext)
     if (xpdd->xb_msg->type != XS_WATCH_EVENT)
     {
       /* process reply - only ever one outstanding */
-      ASSERT(xpdd->xb_reply == NULL);
+      XN_ASSERT(xpdd->xb_reply == NULL);
       xpdd->xb_reply = xpdd->xb_msg;
       xpdd->xb_msg = NULL;
       KeSetEvent(&xpdd->xb_request_complete_event, IO_NO_INCREMENT, FALSE);
@@ -382,7 +382,7 @@ XenBus_Init(PXENPCI_DEVICE_DATA xpdd)
     
   FUNCTION_ENTER();
 
-  ASSERT(KeGetCurrentIrql() == PASSIVE_LEVEL);
+  XN_ASSERT(KeGetCurrentIrql() == PASSIVE_LEVEL);
 
   KeInitializeSpinLock(&xpdd->xb_ring_spinlock);
   ExInitializeFastMutex(&xpdd->xb_request_mutex);
@@ -444,7 +444,7 @@ XenBus_Halt(PXENPCI_DEVICE_DATA xpdd)
 
   FUNCTION_ENTER();
   
-  ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
+  XN_ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
 
   /* we need to remove the watches as a watch firing could lead to a XenBus_Read/Write/Printf */
   for (i = 0; i < MAX_WATCH_ENTRIES; i++)
@@ -477,7 +477,7 @@ XenBus_List(
   char **res;
   char *msg;
 
-  ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
+  XN_ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
 
   repmsg = xenbus_format_msg_reply(xpdd, XS_DIRECTORY, xbt, req, ARRAY_SIZE(req));
   msg = errmsg(repmsg);
@@ -595,9 +595,9 @@ XenBus_AddWatch(
   int i;
   PXENBUS_WATCH_ENTRY w_entry;
 
-  ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
+  XN_ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
 
-  ASSERT(strlen(Path) < ARRAY_SIZE(w_entry->Path));
+  XN_ASSERT(strlen(Path) < ARRAY_SIZE(w_entry->Path));
 
   ExAcquireFastMutex(&xpdd->xb_watch_mutex);
 
@@ -645,7 +645,7 @@ XenBus_RemWatch(
   char *msg;
   int i;
 
-  ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
+  XN_ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
 
   ExAcquireFastMutex(&xpdd->xb_watch_mutex);
 
@@ -687,7 +687,7 @@ XenBus_StartTransaction(PVOID Context, xenbus_transaction_t *xbt)
   struct xsd_sockmsg *rep;
   char *err;
 
-  ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
+  XN_ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
 
   rep = xenbus_format_msg_reply(xpdd, XS_TRANSACTION_START, 0, &req, 1);
   err = errmsg(rep);
@@ -744,7 +744,7 @@ XenBus_Printf(
   char buf[512];
   char *retval;
 
-  ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
+  XN_ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
 
   va_start(ap, fmt);
   RtlStringCbVPrintfA(buf, ARRAY_SIZE(buf), fmt, ap);
