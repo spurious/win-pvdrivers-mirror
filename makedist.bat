@@ -62,6 +62,7 @@ cmd /C "%DDK_PATH%\bin\setenv.bat %DDK_PATH%\ fre WLH && CD /D "%PV_DIR%" && bui
 
 cmd /C "%DDK_PATH%\bin\setenv.bat %DDK_PATH%\ fre x64 WLH && CD /D "%PV_DIR%" && build -cZg && call sign.bat && call wix.bat"
 
+hg status | findstr "^M" || GOTO DONT_TAG
 IF NOT EXIST TAG_HG GOTO DONT_TAG
 IF EXIST BUILD*.WRN GOTO DONT_TAG
 IF EXIST BUILD*.ERR GOTO DONT_TAG
