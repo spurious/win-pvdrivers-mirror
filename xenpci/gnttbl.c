@@ -28,7 +28,7 @@ GntTbl_PutRef(PVOID Context, grant_ref_t ref, ULONG tag)
   
 #if DBG
   if (xpdd->gnttbl_tag[ref].tag != tag)
-    KdPrint((__DRIVER_NAME "     Grant Entry %d for %.4s doesn't match %.4s\n", ref, (PUCHAR)&tag, (PUCHAR)&xpdd->gnttbl_tag[ref].tag));
+    FUNCTION_MSG("Grant Entry %d for %.4s doesn't match %.4s\n", ref, (PUCHAR)&tag, (PUCHAR)&xpdd->gnttbl_tag[ref].tag);
   XN_ASSERT(xpdd->gnttbl_tag[ref].tag == tag);
   xpdd->gnttbl_tag[ref].tag = 0;
   xpdd->gnttbl_tag[ref].generation = (ULONG)-1;
@@ -47,13 +47,13 @@ GntTbl_GetRef(PVOID Context, ULONG tag)
 
   if (!stack_pop(xpdd->gnttbl_ss, &ptr_ref))
   {
-    KdPrint((__DRIVER_NAME "     No free grant refs\n"));
+    FUNCTION_MSG("No free grant refs\n");
     return INVALID_GRANT_REF;
   }
   ref = (grant_ref_t)(ULONG_PTR)ptr_ref;
 #if DBG
   if (xpdd->gnttbl_tag[ref].tag)
-    KdPrint((__DRIVER_NAME "     Grant Entry %d for %.4s in use by %.4s\n", ref, (PUCHAR)&tag, (PUCHAR)&xpdd->gnttbl_tag[ref].tag));
+    FUNCTION_MSG("Grant Entry %d for %.4s in use by %.4s\n", ref, (PUCHAR)&tag, (PUCHAR)&xpdd->gnttbl_tag[ref].tag);
   XN_ASSERT(!xpdd->gnttbl_tag[ref].tag);
   xpdd->gnttbl_tag[ref].generation = xpdd->gnttbl_generation;
   xpdd->gnttbl_tag[ref].tag = tag;
@@ -78,7 +78,7 @@ GntTbl_Map(PVOID Context, unsigned int start_idx, unsigned int end_idx)
     xatp.gpfn = (xen_pfn_t)MmGetMdlPfnArray(xpdd->gnttbl_mdl)[i];
     if (HYPERVISOR_memory_op(xpdd, XENMEM_add_to_physmap, &xatp))
     {
-      KdPrint((__DRIVER_NAME "     *** ERROR MAPPING FRAME %d ***\n", i));
+      FUNCTION_MSG("*** ERROR MAPPING FRAME %d ***\n", i);
     }
   } while (i-- > start_idx);
   FUNCTION_EXIT();
@@ -97,8 +97,6 @@ GntTbl_GrantAccess(
 {
   PXENPCI_DEVICE_DATA xpdd = Context;
 
-  //KdPrint((__DRIVER_NAME " --> GntTbl_GrantAccess\n"));
-
   if (ref == INVALID_GRANT_REF)
     ref = GntTbl_GetRef(Context, tag);
   if (ref == INVALID_GRANT_REF)
@@ -112,9 +110,9 @@ GntTbl_GrantAccess(
   if (xpdd->gnttbl_table[ref].flags)
   {
 #if DBG
-    KdPrint((__DRIVER_NAME "     Grant Entry %d for %.4s still in use by %.4s\n", ref, (PUCHAR)&tag, (PUCHAR)&xpdd->gnttbl_tag[ref].tag));
+    FUNCTION_MSG("Grant Entry %d for %.4s still in use by %.4s\n", ref, (PUCHAR)&tag, (PUCHAR)&xpdd->gnttbl_tag[ref].tag);
 #else
-    KdPrint((__DRIVER_NAME "     Grant Entry %d for %.4s still in use\n", ref, (PUCHAR)&tag));
+    FUNCTION_MSG("Grant Entry %d for %.4s still in use\n", ref, (PUCHAR)&tag);
 #endif
   }
   XN_ASSERT(!xpdd->gnttbl_table[ref].flags);
@@ -143,7 +141,7 @@ GntTbl_EndAccess(
   do {
     if ((flags = nflags) & (GTF_reading|GTF_writing))
     {
-      KdPrint((__DRIVER_NAME "     Grant Entry %d for %.4s still use\n", ref, (PUCHAR)&tag));
+      FUNCTION_MSG("Grant Entry %d for %.4s still use\n", ref, (PUCHAR)&tag);
       return FALSE;
     }
   } while ((nflags = InterlockedCompareExchange16(
@@ -151,7 +149,7 @@ GntTbl_EndAccess(
 
   if (!keepref)
     GntTbl_PutRef(Context, ref, tag);
-  //KdPrint((__DRIVER_NAME " <-- GntTbl_EndAccess\n"));
+
   return TRUE;
 }
 
@@ -166,7 +164,7 @@ GntTbl_QueryMaxFrames(PXENPCI_DEVICE_DATA xpdd)
   rc = HYPERVISOR_grant_table_op(xpdd, GNTTABOP_query_size, &query, 1);
   if ((rc < 0) || (query.status != GNTST_okay))
   {
-    KdPrint((__DRIVER_NAME "     ***CANNOT QUERY MAX GRANT FRAME***\n"));
+    FUNCTION_MSG("***CANNOT QUERY MAX GRANT FRAME***\n");
     return 4; /* Legacy max supported number of frames */
   }
   return query.max_nr_frames;
@@ -183,9 +181,9 @@ GntTbl_Init(PXENPCI_DEVICE_DATA xpdd)
   FUNCTION_ENTER();
   
   xpdd->grant_frames = GntTbl_QueryMaxFrames(xpdd);
-  KdPrint((__DRIVER_NAME "     grant_frames = %d\n", xpdd->grant_frames));
+  FUNCTION_MSG("grant_frames = %d\n", xpdd->grant_frames);
   grant_entries = min(NR_GRANT_ENTRIES, (xpdd->grant_frames * PAGE_SIZE / sizeof(grant_entry_t)));
-  KdPrint((__DRIVER_NAME "     grant_entries = %d\n", grant_entries));
+  FUNCTION_MSG("grant_entries = %d\n", grant_entries);
   #if DBG
   xpdd->gnttbl_tag = ExAllocatePoolWithTag(NonPagedPool, grant_entries * sizeof(grant_tag_t), XENPCI_POOL_TAG);
   RtlZeroMemory(xpdd->gnttbl_tag, grant_entries * sizeof(grant_tag_t));
@@ -214,12 +212,12 @@ GntTbl_Init(PXENPCI_DEVICE_DATA xpdd)
     reservation.nr_extents = 1;
     #pragma warning(disable: 4127) /* conditional expression is constant */
     pfn = (xen_pfn_t)MmGetMdlPfnArray(xpdd->gnttbl_mdl)[i];
-    KdPrint((__DRIVER_NAME "     pfn = %x\n", (ULONG)pfn));
+    FUNCTION_MSG("pfn = %x\n", (ULONG)pfn);
     set_xen_guest_handle(reservation.extent_start, &pfn);
     
-    KdPrint((__DRIVER_NAME "     Calling HYPERVISOR_memory_op - pfn = %x\n", (ULONG)pfn));
+    FUNCTION_MSG("Calling HYPERVISOR_memory_op - pfn = %x\n", (ULONG)pfn);
     ret = HYPERVISOR_memory_op(xpdd, XENMEM_decrease_reservation, &reservation);
-    KdPrint((__DRIVER_NAME "     decreased %d pages for grant table frame %d\n", ret, i));
+    FUNCTION_MSG("decreased %d pages for grant table frame %d\n", ret, i);
   }
 
   stack_new(&xpdd->gnttbl_ss, grant_entries);
@@ -249,7 +247,7 @@ GntTbl_Suspend(PXENPCI_DEVICE_DATA xpdd)
   {
     if (xpdd->gnttbl_tag[i].tag != 0) // && xpdd->gnttbl_tag[i].generation < xpdd->gnttbl_generation)
     {
-      KdPrint((__DRIVER_NAME "     grant entry for %.4s from generation %d\n", (PUCHAR)&xpdd->gnttbl_tag[i].tag, xpdd->gnttbl_tag[i].generation));
+      FUNCTION_MSG("grant entry for %.4s from generation %d\n", (PUCHAR)&xpdd->gnttbl_tag[i].tag, xpdd->gnttbl_tag[i].generation);
     }
   }
   xpdd->gnttbl_generation++;
@@ -258,7 +256,7 @@ GntTbl_Suspend(PXENPCI_DEVICE_DATA xpdd)
   /* copy some grant refs and switch to an alternate freelist, but only on hiber */
   if (KeGetCurrentIrql() <= DISPATCH_LEVEL)
   {
-    KdPrint((__DRIVER_NAME "     backing up grant ref stack\n"));
+    FUNCTION_MSG("backing up grant ref stack\n");
     for (i = 0; i < HIBER_GREF_COUNT; i++)
     {
       xpdd->hiber_grefs[i] = INVALID_GRANT_REF;
@@ -268,7 +266,7 @@ GntTbl_Suspend(PXENPCI_DEVICE_DATA xpdd)
       if ((xpdd->hiber_grefs[i] = GntTbl_GetRef(xpdd, (ULONG)'HIBR')) == INVALID_GRANT_REF)
         break;
     }
-    KdPrint((__DRIVER_NAME "     %d grant refs reserved\n", i));
+    FUNCTION_MSG("%d grant refs reserved\n", i);
     xpdd->gnttbl_ss_copy = xpdd->gnttbl_ss;
     stack_new(&xpdd->gnttbl_ss, HIBER_GREF_COUNT);
   }
@@ -322,19 +320,19 @@ GntTbl_Resume(PXENPCI_DEVICE_DATA xpdd)
     reservation.nr_extents = 1;
     #pragma warning(disable: 4127) /* conditional expression is constant */
     pfn = (xen_pfn_t)MmGetMdlPfnArray(xpdd->gnttbl_mdl)[i];
-    KdPrint((__DRIVER_NAME "     pfn = %x\n", (ULONG)pfn));
+    FUNCTION_MSG("pfn = %x\n", (ULONG)pfn);
     set_xen_guest_handle(reservation.extent_start, &pfn);
     
-    KdPrint((__DRIVER_NAME "     Calling HYPERVISOR_memory_op - pfn = %x\n", (ULONG)pfn));
+    FUNCTION_MSG("Calling HYPERVISOR_memory_op - pfn = %x\n", (ULONG)pfn);
     ret = HYPERVISOR_memory_op(xpdd, XENMEM_decrease_reservation, &reservation);
-    KdPrint((__DRIVER_NAME "     decreased %d pages for grant table frame %d\n", ret, i));
+    FUNCTION_MSG("decreased %d pages for grant table frame %d\n", ret, i);
   }
 
   new_grant_frames = GntTbl_QueryMaxFrames(xpdd);
-  KdPrint((__DRIVER_NAME "     new_grant_frames = %d\n", new_grant_frames));
+  FUNCTION_MSG("new_grant_frames = %d\n", new_grant_frames);
   XN_ASSERT(new_grant_frames >= xpdd->grant_frames); // lazy
   result = GntTbl_Map(xpdd, 0, xpdd->grant_frames - 1);
-  KdPrint((__DRIVER_NAME "     GntTbl_Map result = %d\n", result));
+  FUNCTION_MSG("GntTbl_Map result = %d\n", result);
   memcpy(xpdd->gnttbl_table, xpdd->gnttbl_table_copy, xpdd->grant_frames * PAGE_SIZE);
   #if DBG
   grant_entries = min(NR_GRANT_ENTRIES, (xpdd->grant_frames * PAGE_SIZE / sizeof(grant_entry_t)));
@@ -344,7 +342,7 @@ GntTbl_Resume(PXENPCI_DEVICE_DATA xpdd)
   /* switch back and put the hiber grants back again */
   if (xpdd->gnttbl_ss_copy)
   {
-    KdPrint((__DRIVER_NAME "     restoring grant ref stack\n"));
+    FUNCTION_MSG("restoring grant ref stack\n");
     stack_delete(xpdd->gnttbl_ss, NULL, NULL);
     xpdd->gnttbl_ss = xpdd->gnttbl_ss_copy;
     for (i = 0; i < HIBER_GREF_COUNT; i++)

@@ -64,16 +64,16 @@ XenPci_EvtDeviceUsageNotification(WDFDEVICE device, WDF_SPECIAL_FILE_TYPE notifi
   switch (notification_type)
   {
   case WdfSpecialFilePaging:
-    KdPrint((__DRIVER_NAME "     notification_type = Paging, flag = %d\n", is_in_notification_path));
+    FUNCTION_MSG("notification_type = Paging, flag = %d\n", is_in_notification_path);
     break;
   case WdfSpecialFileHibernation:
-    KdPrint((__DRIVER_NAME "     notification_type = Hibernation, flag = %d\n", is_in_notification_path));
+    FUNCTION_MSG("notification_type = Hibernation, flag = %d\n", is_in_notification_path);
     break;
   case WdfSpecialFileDump:
-    KdPrint((__DRIVER_NAME "     notification_type = Dump, flag = %d\n", is_in_notification_path));
+    FUNCTION_MSG("notification_type = Dump, flag = %d\n", is_in_notification_path);
     break;
   default:
-    KdPrint((__DRIVER_NAME "     notification_type = %d, flag = %d\n", notification_type, is_in_notification_path));
+    FUNCTION_MSG("notification_type = %d, flag = %d\n", notification_type, is_in_notification_path);
     break;
   }
 
@@ -140,7 +140,7 @@ XenPci_EvtDeviceAdd_XenPci(WDFDRIVER driver, PWDFDEVICE_INIT device_init)
   WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&device_attributes, XENPCI_DEVICE_DATA);
   status = WdfDeviceCreate(&device_init, &device_attributes, &device);
   if (!NT_SUCCESS(status)) {
-    KdPrint(("Error creating device %08x\n", status));
+    FUNCTION_MSG("Error creating device %08x\n", status);
     return status;
   }
 
@@ -166,11 +166,11 @@ XenPci_EvtDeviceAdd_XenPci(WDFDRIVER driver, PWDFDEVICE_INIT device_init)
   if (NT_SUCCESS(status)) {
     status = WdfRegistryQueryMultiString(param_key, &veto_devices_name, WDF_NO_OBJECT_ATTRIBUTES, veto_devices);
     if (!NT_SUCCESS(status)) {
-      KdPrint(("Error reading parameters/veto_devices value %08x\n", status));
+      FUNCTION_MSG("Error reading parameters/veto_devices value %08x\n", status);
     }
     WdfRegistryClose(param_key);
   } else {
-    KdPrint(("Error opening parameters key %08x\n", status));
+    FUNCTION_MSG("Error opening parameters key %08x\n", status);
   }
 
   InitializeListHead(&xpdd->veto_list);
@@ -207,7 +207,7 @@ XenPci_EvtDeviceAdd_XenPci(WDFDRIVER driver, PWDFDEVICE_INIT device_init)
   queue_config.EvtIoDefault = XenPci_EvtIoDefault;
   status = WdfIoQueueCreate(device, &queue_config, WDF_NO_OBJECT_ATTRIBUTES, &xpdd->io_queue);
   if (!NT_SUCCESS(status)) {
-      KdPrint(("Error creating queue 0x%x\n", status));
+      FUNCTION_MSG("Error creating queue 0x%x\n", status);
       return status;
   }
   
@@ -218,28 +218,28 @@ XenPci_EvtDeviceAdd_XenPci(WDFDRIVER driver, PWDFDEVICE_INIT device_init)
   status = WdfInterruptCreate(device, &interrupt_config, WDF_NO_OBJECT_ATTRIBUTES, &xpdd->interrupt);
   if (!NT_SUCCESS(status))
   {
-    KdPrint(("Error creating interrupt 0x%x\n", status));
+    FUNCTION_MSG("Error creating interrupt 0x%x\n", status);
     return status;
   }
   
   RtlInitUnicodeString(&reference, L"xenbus");
   status = WdfDeviceCreateDeviceInterface(device, &GUID_DEVINTERFACE_XENBUS, &reference);
   if (!NT_SUCCESS(status)) {
-      KdPrint(("Error registering device interface 0x%x\n", status));
+      FUNCTION_MSG("Error registering device interface 0x%x\n", status);
       return status;
   }
 
   RtlInitUnicodeString(&reference, L"evtchn");
   status = WdfDeviceCreateDeviceInterface(device, &GUID_DEVINTERFACE_EVTCHN, &reference);
   if (!NT_SUCCESS(status)) {
-      KdPrint(("Error registering device interface 0x%x\n", status));
+      FUNCTION_MSG("Error registering device interface 0x%x\n", status);
       return status;
   }
 
   RtlInitUnicodeString(&reference, L"gntdev");
   status = WdfDeviceCreateDeviceInterface(device, &GUID_DEVINTERFACE_GNTDEV, &reference);
   if (!NT_SUCCESS(status)) {
-      KdPrint(("Error registering device interface 0x%x\n", status));
+      FUNCTION_MSG("Error registering device interface 0x%x\n", status);
       return status;
   }
 
@@ -277,7 +277,7 @@ XenPci_IdSuffixMatches(PWDFDEVICE_INIT device_init, PWCHAR matching_id) {
   ULONG properties[] = {DevicePropertyCompatibleIDs, DevicePropertyHardwareID};
   int i;
   
-//  KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
+//  FUNCTION_ENTER();
   for (i = 0; i < ARRAY_SIZE(properties); i++)
   {
 
@@ -396,7 +396,7 @@ VOID
 XenPci_HideQemuDevices() {
   #pragma warning(suppress:28138)
   WRITE_PORT_USHORT(XEN_IOPORT_DEVICE_MASK, (USHORT)qemu_hide_flags_value); //QEMU_UNPLUG_ALL_IDE_DISKS|QEMU_UNPLUG_ALL_NICS);
-  KdPrint((__DRIVER_NAME "     Disabled qemu devices %02x\n", qemu_hide_flags_value));
+  FUNCTION_MSG("Disabled qemu devices %02x\n", qemu_hide_flags_value);
 }
 
 static BOOLEAN
@@ -406,7 +406,7 @@ XenPci_CheckHideQemuDevices()
   if (READ_PORT_USHORT(XEN_IOPORT_MAGIC) == 0x49d2) {
     #pragma warning(suppress:28138)
     qemu_protocol_version = READ_PORT_UCHAR(XEN_IOPORT_VERSION);
-    KdPrint((__DRIVER_NAME "     Version = %d\n", qemu_protocol_version));
+    FUNCTION_MSG("Version = %d\n", qemu_protocol_version);
     switch(qemu_protocol_version) {
     case 1:
       #pragma warning(suppress:28138)
@@ -416,14 +416,14 @@ XenPci_CheckHideQemuDevices()
       #pragma warning(suppress:28138)
       if (READ_PORT_USHORT(XEN_IOPORT_MAGIC) != 0x49d2)
       {
-        KdPrint((__DRIVER_NAME "     Blacklisted\n"));
+        FUNCTION_MSG("Blacklisted\n");
         break;
       }
       /* fall through */
     case 0:
       return TRUE;
     default:
-      KdPrint((__DRIVER_NAME "     Unknown qemu version %d\n", qemu_protocol_version));
+      FUNCTION_MSG("Unknown qemu version %d\n", qemu_protocol_version);
       break;
     }
   }
@@ -457,7 +457,7 @@ XenPci_FixLoadOrder()
   status = WdfRegistryOpenKey(NULL, &sgo_name, KEY_QUERY_VALUE, WDF_NO_OBJECT_ATTRIBUTES, &sgo_key);
   if (!NT_SUCCESS(status))
   {
-    KdPrint((__DRIVER_NAME "     Error opening ServiceGroupOrder key %08x\n", status));
+    FUNCTION_MSG("Error opening ServiceGroupOrder key %08x\n", status);
     return;
   }
   WdfCollectionCreate(WDF_NO_OBJECT_ATTRIBUTES, &old_load_order);
@@ -465,12 +465,12 @@ XenPci_FixLoadOrder()
   status = WdfRegistryQueryMultiString(sgo_key, &list_name, WDF_NO_OBJECT_ATTRIBUTES, old_load_order);
   if (!NT_SUCCESS(status))
   {
-    KdPrint((__DRIVER_NAME "     Error reading ServiceGroupOrder\\List value %08x\n", status));
+    FUNCTION_MSG("Error reading ServiceGroupOrder\\List value %08x\n", status);
     WdfObjectDelete(new_load_order);
     WdfObjectDelete(old_load_order);
     return;
   }
-  //KdPrint((__DRIVER_NAME "     Current Order:\n"));        
+  //FUNCTION_MSG("Current Order:\n");        
   for (i = 0; i < WdfCollectionGetCount(old_load_order); i++)
   {
     WDFOBJECT ws = WdfCollectionGetItem(old_load_order, i);
@@ -484,12 +484,12 @@ XenPci_FixLoadOrder()
       xenpci_group_index = (ULONG)i;         
     if (!RtlCompareUnicodeString(&val, &boot_bus_extender_name, TRUE))
       boot_bus_extender_index = (ULONG)i;         
-    //KdPrint((__DRIVER_NAME "       %wZ\n", &val));        
+    //FUNCTION_MSG("  %wZ\n", &val);        
   }
-  KdPrint((__DRIVER_NAME "     dummy_group_index = %d\n", dummy_group_index));
-  KdPrint((__DRIVER_NAME "     wdf_load_group_index = %d\n", wdf_load_group_index));
-  KdPrint((__DRIVER_NAME "     xenpci_group_index = %d\n", xenpci_group_index));
-  KdPrint((__DRIVER_NAME "     boot_bus_extender_index = %d\n", boot_bus_extender_index));
+  FUNCTION_MSG("dummy_group_index = %d\n", dummy_group_index);
+  FUNCTION_MSG("wdf_load_group_index = %d\n", wdf_load_group_index);
+  FUNCTION_MSG("xenpci_group_index = %d\n", xenpci_group_index);
+  FUNCTION_MSG("boot_bus_extender_index = %d\n", boot_bus_extender_index);
   if (boot_bus_extender_index == -1)
   {
     WdfObjectDelete(new_load_order);
@@ -535,13 +535,13 @@ XenPci_FixLoadOrder()
     WdfCollectionAdd(new_load_order, ws);
   }
   WdfRegistryAssignMultiString(sgo_key, &list_name, new_load_order);
-  //KdPrint((__DRIVER_NAME "     New Order:\n"));        
+  //FUNCTION_MSG("New Order:\n");        
   for (i = 0; i < WdfCollectionGetCount(new_load_order); i++)
   {
     WDFOBJECT ws = WdfCollectionGetItem(new_load_order, i);
     UNICODE_STRING val;
     WdfStringGetUnicodeString(ws, &val);
-    //KdPrint((__DRIVER_NAME "       %wZ\n", &val));        
+    //FUNCTION_MSG("  %wZ\n", &val);        
   }
   WdfObjectDelete(new_load_order);
   WdfObjectDelete(old_load_order);
@@ -647,15 +647,11 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
   }
 #endif
 
-  /* again after enabling DbgPrint hooking */
-  KdPrint((__DRIVER_NAME " " VER_FILEVERSION_STR "\n"));
-
-  
   WDF_DRIVER_CONFIG_INIT(&config, XenPci_EvtDeviceAdd);
   config.EvtDriverUnload = XenPci_EvtDriverUnload;
   status = WdfDriverCreate(DriverObject, RegistryPath, WDF_NO_OBJECT_ATTRIBUTES, &config, &driver);
   if (!NT_SUCCESS(status)) {
-    KdPrint((__DRIVER_NAME "     WdfDriverCreate failed with status 0x%x\n", status));
+    FUNCTION_MSG("WdfDriverCreate failed with status 0x%x\n", status);
     FUNCTION_EXIT();
     //#if DBG
     //XenPci_UnHookDbgPrint();
@@ -667,13 +663,13 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
   
   status = WdfDriverOpenParametersRegistryKey(driver, KEY_QUERY_VALUE, &parent_attributes, &param_key);
   if (!NT_SUCCESS(status)) {
-    KdPrint(("Error opening parameters key %08x\n", status));
+    FUNCTION_MSG("Error opening parameters key %08x\n", status);
     goto error;
   }
 
   status = AuxKlibInitialize();
   if(!NT_SUCCESS(status)) {
-    KdPrint((__DRIVER_NAME "     AuxKlibInitialize failed %08x\n", status));
+    FUNCTION_MSG("AuxKlibInitialize failed %08x\n", status);
     goto error;
   }
 
@@ -689,7 +685,7 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
   }
   WdfRegistryClose(control_key);
 
-  KdPrint((__DRIVER_NAME "     SystemStartOptions = %wZ\n", &system_start_options));
+  FUNCTION_MSG("SystemStartOptions = %wZ\n", &system_start_options);
   
   always_patch = 0;
   WdfRegistryQueryULong(param_key, &txt_always_patch_name, &always_patch);
@@ -698,7 +694,7 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
     WDFKEY memory_key;
     ULONG verifier_value;
     
-    KdPrint((__DRIVER_NAME "     PATCHTPR found\n"));
+    FUNCTION_MSG("PATCHTPR found\n");
     
     tpr_patch_requested = TRUE;
     status = WdfRegistryOpenKey(NULL, &verifier_key_name, KEY_READ, &parent_attributes, &memory_key);
@@ -708,7 +704,7 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
       status = WdfRegistryQueryULong(memory_key, &verifier_value_name, &verifier_value);
       if (NT_SUCCESS(status) && verifier_value != 0)
       {
-        KdPrint((__DRIVER_NAME "     Verifier active - not patching\n"));
+        FUNCTION_MSG("Verifier active - not patching\n");
         tpr_patch_requested = FALSE;
       }
       WdfRegistryClose(memory_key);
@@ -749,7 +745,7 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
   return STATUS_SUCCESS;
 
 error:
-  KdPrint(("Failed, returning %08x\n", status));
+  FUNCTION_MSG("Failed, returning %08x\n", status);
   FUNCTION_EXIT();
   return status;
 }

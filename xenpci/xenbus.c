@@ -173,7 +173,7 @@ XenBus_Read(
   char *res;
   char *msg;
 
-  //KdPrint((__DRIVER_NAME " --> " __FUNCTION__ "\n"));
+  //FUNCTION_ENTER();
 
   XN_ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
 
@@ -189,7 +189,7 @@ XenBus_Read(
   ExFreePoolWithTag(rep, XENPCI_POOL_TAG);
   *value = res;
 
-  //KdPrint((__DRIVER_NAME " <-- " __FUNCTION__ "\n"));
+  FUNCTION_EXIT();
 
   return NULL;
 }
@@ -240,7 +240,7 @@ XenBus_WatchWorkItemProc(WDFWORKITEM workitem)
   index = atoi(path + strlen(path) + 1);
   if (index < 0 || index >= MAX_WATCH_ENTRIES)
   {
-    KdPrint((__DRIVER_NAME "     Watch index %d out of range\n", index));
+    FUNCTION_MSG("Watch index %d out of range\n", index);
     WdfObjectDelete(workitem);
     //FUNCTION_ENTER();
     return;
@@ -249,7 +249,7 @@ XenBus_WatchWorkItemProc(WDFWORKITEM workitem)
   entry = &xpdd->XenBus_WatchEntries[index];
   if (!entry->Active || !entry->ServiceRoutine)
   {
-    KdPrint((__DRIVER_NAME "     No watch for index %d\n", index));
+    FUNCTION_MSG("No watch for index %d\n", index);
     ExReleaseFastMutex(&xpdd->xb_watch_mutex);
     WdfObjectDelete(workitem);
     //FUNCTION_ENTER();
@@ -289,7 +289,7 @@ XenBus_Dpc(PVOID ServiceContext)
     {
       if (rsp_prod - xpdd->xen_store_interface->rsp_cons < sizeof(xsd_sockmsg_t))
       {
-        //KdPrint((__DRIVER_NAME " +++ Message incomplete (not even a full header)\n"));
+        //FUNCTION_MSG("Message incomplete (not even a full header)\n");
         break;
       }
       memcpy_from_ring(xpdd->xen_store_interface->rsp, &msg,
@@ -311,7 +311,7 @@ XenBus_Dpc(PVOID ServiceContext)
 
     if (xpdd->xb_msg_offset < sizeof(xsd_sockmsg_t) + xpdd->xb_msg->len)
     {
-      //KdPrint((__DRIVER_NAME " +++ Message incomplete (header but not full body)\n"));
+      //FUNCTION_MSG("Message incomplete (header but not full body)\n");
       EvtChn_Notify(xpdd, xpdd->xenbus_event); /* there is room on the ring now */
       break;
     }
@@ -334,7 +334,7 @@ XenBus_Dpc(PVOID ServiceContext)
       status = WdfWorkItemCreate(&workitem_config, &workitem_attributes, &workitem);
       if (!NT_SUCCESS(status))
       {
-        KdPrint((__DRIVER_NAME "     Failed to create work item for watch\n"));
+        FUNCTION_MSG("Failed to create work item for watch\n");
         continue;
       }
       memcpy(WdfObjectGetTypedContext(workitem, xsd_sockmsg_t), xpdd->xb_msg, xpdd->xb_msg_offset);
@@ -572,7 +572,7 @@ XenBus_Resume(PXENPCI_DEVICE_DATA xpdd)
   {
     if (xpdd->XenBus_WatchEntries[i].Active)
     {
-      KdPrint((__DRIVER_NAME "     Adding watch for path = %s\n", xpdd->XenBus_WatchEntries[i].Path));
+      FUNCTION_MSG("Adding watch for path = %s\n", xpdd->XenBus_WatchEntries[i].Path);
       XenBus_SendAddWatch(xpdd, XBT_NIL, xpdd->XenBus_WatchEntries[i].Path, i);
     }
   }
@@ -607,7 +607,7 @@ XenBus_AddWatch(
   
   if (i == MAX_WATCH_ENTRIES)
   {
-    KdPrint((__DRIVER_NAME " +++ No more watch slots left\n"));
+    FUNCTION_MSG("No more watch slots left\n");
     ExReleaseFastMutex(&xpdd->xb_watch_mutex);
     return NULL;
   }
@@ -656,14 +656,14 @@ XenBus_RemWatch(
         && !strcmp(xpdd->XenBus_WatchEntries[i].Path, Path)
         && xpdd->XenBus_WatchEntries[i].ServiceRoutine == ServiceRoutine
         && xpdd->XenBus_WatchEntries[i].ServiceContext == ServiceContext) {
-      KdPrint((__DRIVER_NAME "     Match\n"));
+      FUNCTION_MSG("Match\n");
       break;
     }
   }
 
   if (i == MAX_WATCH_ENTRIES) {
     ExReleaseFastMutex(&xpdd->xb_watch_mutex);
-    KdPrint((__DRIVER_NAME "     Watch not set for %s - can't remove\n", Path));
+    FUNCTION_MSG("Watch not set for %s - can't remove\n", Path);
     return NULL;
   }
 

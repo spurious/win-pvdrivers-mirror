@@ -111,16 +111,16 @@ to CPU != 0, but we should always use vcpu_info[0]
   UNREFERENCED_PARAMETER(message_id);
 
   if (xpdd->interrupts_masked) {
-    KdPrint((__DRIVER_NAME "     unhandled interrupt\n"));
+    FUNCTION_MSG("unhandled interrupt\n");
   }
 
   if (xpdd->hibernated) {
-    KdPrint((__DRIVER_NAME "     interrupt while hibernated\n"));
+    FUNCTION_MSG("interrupt while hibernated\n");
   }
 
   for (i = 0; i < ARRAY_SIZE(xpdd->evtchn_pending_pvt[pcpu]); i++) {
     if (xpdd->evtchn_pending_pvt[pcpu][i]) {
-      KdPrint((__DRIVER_NAME "     Unacknowledged event word = %d, val = %p\n", i, xpdd->evtchn_pending_pvt[pcpu][i]));
+      FUNCTION_MSG("Unacknowledged event word = %d, val = %p\n", i, xpdd->evtchn_pending_pvt[pcpu][i]);
       xpdd->evtchn_pending_pvt[pcpu][i] = 0;
     }
   }
@@ -149,16 +149,16 @@ to CPU != 0, but we should always use vcpu_info[0]
       switch (ev_action->type)
       {
       case EVT_ACTION_TYPE_NORMAL:
-        //KdPrint((__DRIVER_NAME "     EVT_ACTION_TYPE_NORMAL port = %d\n", port));
+        //FUNCTION_MSG("EVT_ACTION_TYPE_NORMAL port = %d\n", port);
         ev_action->ServiceRoutine(ev_action->ServiceContext);
         break;
       case EVT_ACTION_TYPE_DPC:
-        //KdPrint((__DRIVER_NAME "     EVT_ACTION_TYPE_DPC port = %d\n", port));
+        //FUNCTION_MSG("EVT_ACTION_TYPE_DPC port = %d\n", port);
         KeInsertQueueDpc(&ev_action->Dpc, NULL, NULL);
         break;
 #if 0
       case EVT_ACTION_TYPE_SUSPEND:
-        KdPrint((__DRIVER_NAME "     EVT_ACTION_TYPE_SUSPEND\n"));
+        FUNCTION_MSG("EVT_ACTION_TYPE_SUSPEND\n");
         for (i = 0; i < NR_EVENTS; i++)
         {
           if (!(xpdd->ev_actions[i].flags & EVT_ACTION_FLAGS_NO_SUSPEND))
@@ -191,7 +191,7 @@ to CPU != 0, but we should always use vcpu_info[0]
         break;
 #endif
       default:
-        KdPrint((__DRIVER_NAME "     Unhandled Event!!! port=%d\n", port));
+        FUNCTION_MSG("Unhandled Event!!! port=%d\n", port);
         break;
       }
     }
@@ -236,9 +236,8 @@ EvtChn_Bind(PVOID Context, evtchn_port_t port, PXN_EVENT_CALLBACK ServiceRoutine
 
   FUNCTION_ENTER();
   
-  if (InterlockedCompareExchange((volatile LONG *)&action->type, EVT_ACTION_TYPE_NEW, EVT_ACTION_TYPE_EMPTY) != EVT_ACTION_TYPE_EMPTY)
-  {
-    KdPrint((__DRIVER_NAME " Handler for port %d already registered\n", port));
+  if (InterlockedCompareExchange((volatile LONG *)&action->type, EVT_ACTION_TYPE_NEW, EVT_ACTION_TYPE_EMPTY) != EVT_ACTION_TYPE_EMPTY) {
+    FUNCTION_MSG("Handler for port %d already registered\n", port);
     return STATUS_UNSUCCESSFUL;
   }
 
@@ -257,16 +256,14 @@ EvtChn_Bind(PVOID Context, evtchn_port_t port, PXN_EVENT_CALLBACK ServiceRoutine
 }
 
 NTSTATUS
-EvtChn_BindDpc(PVOID Context, evtchn_port_t port, PXN_EVENT_CALLBACK ServiceRoutine, PVOID ServiceContext, ULONG flags)
-{
+EvtChn_BindDpc(PVOID Context, evtchn_port_t port, PXN_EVENT_CALLBACK ServiceRoutine, PVOID ServiceContext, ULONG flags) {
   PXENPCI_DEVICE_DATA xpdd = Context;
   ev_action_t *action = &xpdd->ev_actions[port];
 
   FUNCTION_ENTER();
   
-  if (InterlockedCompareExchange((volatile LONG *)&action->type, EVT_ACTION_TYPE_NEW, EVT_ACTION_TYPE_EMPTY) != EVT_ACTION_TYPE_EMPTY)
-  {
-    KdPrint((__DRIVER_NAME " Handler for port %d already registered\n", port));
+  if (InterlockedCompareExchange((volatile LONG *)&action->type, EVT_ACTION_TYPE_NEW, EVT_ACTION_TYPE_EMPTY) != EVT_ACTION_TYPE_EMPTY) {
+    FUNCTION_MSG(" Handler for port %d already registered\n", port);
     return STATUS_UNSUCCESSFUL;
   }
 
@@ -295,7 +292,7 @@ EvtChn_BindIrq(PVOID Context, evtchn_port_t port, ULONG vector, PCHAR descriptio
   
   if (InterlockedCompareExchange((volatile LONG *)&action->type, EVT_ACTION_TYPE_NEW, EVT_ACTION_TYPE_EMPTY) != EVT_ACTION_TYPE_EMPTY)
   {
-    KdPrint((__DRIVER_NAME " Handler for port %d already registered\n", port));
+    FUNCTION_MSG("Handler for port %d already registered\n", port);
     return STATUS_UNSUCCESSFUL;
   }
 
@@ -441,7 +438,7 @@ EvtChn_Init(PXENPCI_DEVICE_DATA xpdd)
   KeMemoryBarrier();
 
   result = hvm_set_parameter(xpdd, HVM_PARAM_CALLBACK_IRQ, xpdd->irq_number);
-  KdPrint((__DRIVER_NAME "     hvm_set_parameter(HVM_PARAM_CALLBACK_IRQ, %d) = %d\n", xpdd->irq_number, (ULONG)result));
+  FUNCTION_MSG("hvm_set_parameter(HVM_PARAM_CALLBACK_IRQ, %d) = %d\n", xpdd->irq_number, (ULONG)result);
 
   for (i = 0; i < MAX_VIRT_CPUS; i++)
     xpdd->shared_info_area->vcpu_info[i].evtchn_upcall_mask = 0;  
@@ -453,7 +450,7 @@ EvtChn_Init(PXENPCI_DEVICE_DATA xpdd)
   xpdd->pdo_event_channel = EvtChn_AllocIpi(xpdd, 0);
   EvtChn_BindDpc(xpdd, xpdd->pdo_event_channel, EvtChn_PdoEventChannelDpc, xpdd, EVT_ACTION_FLAGS_DEFAULT);
   xpdd->ev_actions[xpdd->pdo_event_channel].type = EVT_ACTION_TYPE_SUSPEND; /* override dpc type */
-  KdPrint((__DRIVER_NAME "     pdo_event_channel = %d\n", xpdd->pdo_event_channel));
+  FUNCTION_MSG("pdo_event_channel = %d\n", xpdd->pdo_event_channel);
 #endif  
 
   FUNCTION_EXIT();

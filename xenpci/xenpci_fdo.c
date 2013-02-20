@@ -52,14 +52,14 @@ XenPci_MapHalThenPatchKernel(PXENPCI_DEVICE_DATA xpdd)
     amei = ExAllocatePoolWithTag(NonPagedPool, module_info_buffer_size, XENPCI_POOL_TAG);
   }
   
-  KdPrint((__DRIVER_NAME "     AuxKlibQueryModuleInformation = %d\n", status));
+  FUNCTION_MSG("AuxKlibQueryModuleInformation = %d\n", status);
   for (i = 0; i < module_info_buffer_size / sizeof(AUX_MODULE_EXTENDED_INFO); i++)
   {
     if (strcmp((PCHAR)amei[i].FullPathName + amei[i].FileNameOffset, "hal.dll") == 0)
     {
-      KdPrint((__DRIVER_NAME "     hal.dll found at %p - %p\n", 
+      FUNCTION_MSG("hal.dll found at %p - %p\n", 
         amei[i].BasicInfo.ImageBase,
-        ((PUCHAR)amei[i].BasicInfo.ImageBase) + amei[i].ImageSize));
+        ((PUCHAR)amei[i].BasicInfo.ImageBase) + amei[i].ImageSize);
       XenPci_PatchKernel(xpdd, amei[i].BasicInfo.ImageBase, amei[i].ImageSize);
     }
   }
@@ -127,14 +127,14 @@ XenPci_Init(PXENPCI_DEVICE_DATA xpdd)
     xpdd->shared_info_area = MmMapIoSpace(xpdd->shared_info_area_unmapped,
       PAGE_SIZE, MmNonCached);
   }
-  KdPrint((__DRIVER_NAME "     shared_info_area_unmapped.QuadPart = %lx\n", xpdd->shared_info_area_unmapped.QuadPart));
+  FUNCTION_MSG("shared_info_area_unmapped.QuadPart = %lx\n", xpdd->shared_info_area_unmapped.QuadPart);
   xatp.domid = DOMID_SELF;
   xatp.idx = 0;
   xatp.space = XENMAPSPACE_shared_info;
   xatp.gpfn = (xen_pfn_t)(xpdd->shared_info_area_unmapped.QuadPart >> PAGE_SHIFT);
-  KdPrint((__DRIVER_NAME "     gpfn = %x\n", xatp.gpfn));
+  FUNCTION_MSG("gpfn = %x\n", xatp.gpfn);
   ret = HYPERVISOR_memory_op(xpdd, XENMEM_add_to_physmap, &xatp);
-  KdPrint((__DRIVER_NAME "     hypervisor memory op (XENMAPSPACE_shared_info) ret = %d\n", ret));
+  FUNCTION_MSG("hypervisor memory op (XENMAPSPACE_shared_info) ret = %d\n", ret);
 
   FUNCTION_EXIT();
 
@@ -160,13 +160,13 @@ XenPci_SysrqHandler(char *path, PVOID context) {
 
   XenBus_Read(xpdd, XBT_NIL, SYSRQ_PATH, &value);
 
-  KdPrint((__DRIVER_NAME "     SysRq Value = %s\n", value));
+  FUNCTION_MSG("SysRq Value = %s\n", value);
 
   if (value != NULL && strlen(value) != 0) {
     letter = *value;
     res = XenBus_Write(xpdd, XBT_NIL, SYSRQ_PATH, "");
     if (res) {
-      KdPrint(("Error writing sysrq path\n"));
+      FUNCTION_MSG("Error writing sysrq path\n");
       XenPci_FreeMem(res);
       return;
     }
@@ -190,7 +190,7 @@ XenPci_SysrqHandler(char *path, PVOID context) {
     XN_ASSERT(letter != 'A');
     break;
   default:
-    KdPrint(("     Unhandled sysrq letter %c\n", letter));
+    FUNCTION_MSG("Unhandled sysrq letter %c\n", letter);
     break;
   }
 
@@ -244,7 +244,7 @@ XenPci_BalloonThreadProc(PVOID StartContext)
     KeWaitForSingleObject(&xpdd->balloon_event, Executive, KernelMode, FALSE, ptimeout);
     if (xpdd->balloon_shutdown)
       PsTerminateSystemThread(0);
-    KdPrint((__DRIVER_NAME "     Got balloon event, current = %d, target = %d\n", xpdd->current_memory_kb, xpdd->target_memory_kb));
+    FUNCTION_MSG("Got balloon event, current = %d, target = %d\n", xpdd->current_memory_kb, xpdd->target_memory_kb);
     /* not really worried about races here, but cache target so we only read it once */
     new_target_kb = xpdd->target_memory_kb;
     // perform some sanity checks on target_memory
@@ -252,10 +252,10 @@ XenPci_BalloonThreadProc(PVOID StartContext)
     // make sure target > some % of initial
     
     if (xpdd->current_memory_kb == new_target_kb) {
-      KdPrint((__DRIVER_NAME "     No change to memory\n"));
+      FUNCTION_MSG("No change to memory\n");
       continue;
     } else if (xpdd->current_memory_kb < new_target_kb) {
-      KdPrint((__DRIVER_NAME "     Trying to take %d KB from Xen\n", new_target_kb - xpdd->current_memory_kb));
+      FUNCTION_MSG("Trying to take %d KB from Xen\n", new_target_kb - xpdd->current_memory_kb);
       while ((mdl = head) != NULL && xpdd->current_memory_kb < new_target_kb) {
         pfn_count = ADDRESS_AND_SIZE_TO_SPAN_PAGES(MmGetMdlVirtualAddress(mdl), MmGetMdlByteCount(mdl));
         pfns = ExAllocatePoolWithTag(NonPagedPool, pfn_count * sizeof(xen_pfn_t), XENPCI_POOL_TAG);
@@ -269,15 +269,15 @@ XenPci_BalloonThreadProc(PVOID StartContext)
         #pragma warning(disable: 4127) /* conditional expression is constant */
         set_xen_guest_handle(reservation.extent_start, pfns);
         
-        //KdPrint((__DRIVER_NAME "     Calling HYPERVISOR_memory_op(XENMEM_populate_physmap) - pfn_count = %d\n", pfn_count));
+        //FUNCTION_MSG("Calling HYPERVISOR_memory_op(XENMEM_populate_physmap) - pfn_count = %d\n", pfn_count);
         ret = HYPERVISOR_memory_op(xpdd, XENMEM_populate_physmap, &reservation);
-        //KdPrint((__DRIVER_NAME "     populated %d pages\n", ret));
+        //FUNCTION_MSG("populated %d pages\n", ret);
         if (ret < (ULONG)pfn_count) {
           if (ret > 0) {
             /* We hit the Xen hard limit: reprobe. */
             reservation.nr_extents = ret;
             ret = HYPERVISOR_memory_op(xpdd, XENMEM_decrease_reservation, &reservation);
-            KdPrint((__DRIVER_NAME "     decreased %d pages (xen is out of pages)\n", ret));
+            FUNCTION_MSG("decreased %d pages (xen is out of pages)\n", ret);
           }
           ExFreePoolWithTag(pfns, XENPCI_POOL_TAG);
           break;
@@ -290,7 +290,7 @@ XenPci_BalloonThreadProc(PVOID StartContext)
         xpdd->current_memory_kb += BALLOON_UNITS_KB;
       }
     } else {
-      KdPrint((__DRIVER_NAME "     Trying to give %d KB to Xen\n", xpdd->current_memory_kb - new_target_kb));
+      FUNCTION_MSG("Trying to give %d KB to Xen\n", xpdd->current_memory_kb - new_target_kb);
       while (xpdd->current_memory_kb > new_target_kb) {
         PHYSICAL_ADDRESS alloc_low;
         PHYSICAL_ADDRESS alloc_high;
@@ -300,7 +300,7 @@ XenPci_BalloonThreadProc(PVOID StartContext)
         alloc_skip.QuadPart = 0;
 
         if (!hit_initial_target && low_mem_event && KeReadStateEvent(low_mem_event)) {
-          KdPrint((__DRIVER_NAME "     Low memory condition exists. Waiting.\n"));
+          FUNCTION_MSG("Low memory condition exists. Waiting.\n");
           break;
         }
 
@@ -311,7 +311,7 @@ XenPci_BalloonThreadProc(PVOID StartContext)
         mdl = MmAllocatePagesForMdl(alloc_low, alloc_high, alloc_skip, BALLOON_UNITS_KB * 1024);
         #endif
         if (!mdl) {
-          KdPrint((__DRIVER_NAME "     Allocation failed - try again soon\n"));
+          FUNCTION_MSG("Allocation failed - try again soon\n");
           break;
         } else {
           int i;
@@ -319,7 +319,7 @@ XenPci_BalloonThreadProc(PVOID StartContext)
           int pfn_count = ADDRESS_AND_SIZE_TO_SPAN_PAGES(MmGetMdlVirtualAddress(mdl), MmGetMdlByteCount(mdl));
           if (pfn_count != BALLOON_UNIT_PAGES) {
             /* we could probably do this better but it will only happen in low memory conditions... */
-            KdPrint((__DRIVER_NAME "     wanted %d pages got %d pages\n", BALLOON_UNIT_PAGES, pfn_count));
+            FUNCTION_MSG("wanted %d pages got %d pages\n", BALLOON_UNIT_PAGES, pfn_count);
             MmFreePagesFromMdl(mdl);
             ExFreePool(mdl);
             break;
@@ -347,7 +347,7 @@ XenPci_BalloonThreadProc(PVOID StartContext)
         }
       }
     }
-    KdPrint((__DRIVER_NAME "     Memory = %d, Balloon Target = %d\n", xpdd->current_memory_kb, new_target_kb));
+    FUNCTION_MSG("Memory = %d, Balloon Target = %d\n", xpdd->current_memory_kb, new_target_kb);
   }
 }
 
@@ -400,19 +400,19 @@ XenPci_Suspend0(PVOID context)
 
   /* this code was to fix a bug that existed in Xen for a short time... it is harmless but can probably be removed */
   if (__readmsr(0x174) != sysenter_cs) {
-    KdPrint((__DRIVER_NAME "     sysenter_cs not restored. Fixing.\n"));
+    FUNCTION_MSG("sysenter_cs not restored. Fixing.\n");
     __writemsr(0x174, sysenter_cs);
   }
   if (__readmsr(0x175) != sysenter_esp) {
-    KdPrint((__DRIVER_NAME "     sysenter_esp not restored. Fixing.\n"));
+    FUNCTION_MSG("sysenter_esp not restored. Fixing.\n");
     __writemsr(0x175, sysenter_esp);
   }
   if (__readmsr(0x176) != sysenter_eip) {
-      KdPrint((__DRIVER_NAME "     sysenter_eip not restored. Fixing.\n"));
+      FUNCTION_MSG("sysenter_eip not restored. Fixing.\n");
     __writemsr(0x176, sysenter_eip);
   }
 
-  KdPrint((__DRIVER_NAME "     back from suspend, cancelled = %d\n", cancelled));
+  FUNCTION_MSG("back from suspend, cancelled = %d\n", cancelled);
 
   if (qemu_hide_flags_value) {
     XenPci_HideQemuDevices();
@@ -431,7 +431,7 @@ XenPci_SuspendN(PVOID context)
   UNREFERENCED_PARAMETER(context);
   
   FUNCTION_ENTER();
-  KdPrint((__DRIVER_NAME "     doing nothing on cpu N\n"));
+  FUNCTION_MSG("doing nothing on cpu N\n");
   FUNCTION_EXIT();
 }
 
@@ -446,7 +446,7 @@ XenPci_ConnectSuspendEvt(PXENPCI_DEVICE_DATA xpdd) {
   CHAR path[128];
 
   xpdd->suspend_evtchn = EvtChn_AllocUnbound(xpdd, 0);
-  KdPrint((__DRIVER_NAME "     suspend event channel = %d\n", xpdd->suspend_evtchn));
+  FUNCTION_MSG("suspend event channel = %d\n", xpdd->suspend_evtchn);
   RtlStringCbPrintfA(path, ARRAY_SIZE(path), "device/suspend/event-channel");
   XenBus_Printf(xpdd, XBT_NIL, path, "%d", xpdd->suspend_evtchn);
   EvtChn_BindDpc(xpdd, xpdd->suspend_evtchn, XenPci_SuspendEvtDpc, xpdd->wdf_device, EVT_ACTION_FLAGS_NO_SUSPEND);
@@ -513,7 +513,7 @@ XenPci_SuspendEvtDpc(PVOID context)
   WDF_WORKITEM_CONFIG workitem_config;
   WDFWORKITEM workitem;
 
-  KdPrint((__DRIVER_NAME "     Suspend detected via Dpc\n"));
+  FUNCTION_MSG("Suspend detected via Dpc\n");
   WDF_WORKITEM_CONFIG_INIT(&workitem_config, XenPci_SuspendResume);
   WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
   attributes.ParentObject = device;
@@ -546,18 +546,18 @@ XenPci_ShutdownHandler(char *path, PVOID context)
   res = XenBus_Read(xpdd, XBT_NIL, SHUTDOWN_PATH, &value);
   if (res)
   {
-    KdPrint(("Error reading shutdown path - %s\n", res));
+    FUNCTION_MSG("Error reading shutdown path - %s\n", res);
     XenPci_FreeMem(res);
     FUNCTION_EXIT();
     return;
   }
 
-  KdPrint((__DRIVER_NAME "     Shutdown value = %s\n", value));
+  FUNCTION_MSG("Shutdown value = %s\n", value);
 
   if (strlen(value) && strcmp(value, "suspend") == 0)
   {
     {
-      KdPrint((__DRIVER_NAME "     Suspend detected\n"));
+      FUNCTION_MSG("Suspend detected\n");
       /* we have to queue this as a work item as we stop the xenbus thread, which we are currently running in! */
       WDF_WORKITEM_CONFIG_INIT(&workitem_config, XenPci_SuspendResume);
       WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
@@ -597,7 +597,7 @@ XenPci_DeviceWatchHandler(char *path, PVOID context)
     {
       XenPci_FreeMem(value);
       /* we probably have to be a bit smarter here and do nothing if xenpci isn't running yet */
-      KdPrint((__DRIVER_NAME "     Rescanning child list\n"));
+      FUNCTION_MSG("Rescanning child list\n");
       XenPci_EvtChildListScanForChildren(xpdd->child_list);
     }
   }
@@ -624,13 +624,13 @@ XenPci_EvtDevicePrepareHardware (WDFDEVICE device, WDFCMRESLIST resources_raw, W
     translated_descriptor = WdfCmResourceListGetDescriptor(resources_translated, i);
     switch (raw_descriptor->Type) {
     case CmResourceTypePort:
-      KdPrint((__DRIVER_NAME "     IoPort Address(%x) Length: %d\n", translated_descriptor->u.Port.Start.LowPart, translated_descriptor->u.Port.Length));
+      FUNCTION_MSG("IoPort Address(%x) Length: %d\n", translated_descriptor->u.Port.Start.LowPart, translated_descriptor->u.Port.Length);
       xpdd->platform_ioport_addr = translated_descriptor->u.Port.Start.LowPart;
       xpdd->platform_ioport_len = translated_descriptor->u.Port.Length;
       break;
     case CmResourceTypeMemory:
-      KdPrint((__DRIVER_NAME "     Memory mapped CSR:(%x:%x) Length:(%d)\n", translated_descriptor->u.Memory.Start.LowPart, translated_descriptor->u.Memory.Start.HighPart, translated_descriptor->u.Memory.Length));
-      KdPrint((__DRIVER_NAME "     Memory flags = %04X\n", translated_descriptor->Flags));
+      FUNCTION_MSG("Memory mapped CSR:(%x:%x) Length:(%d)\n", translated_descriptor->u.Memory.Start.LowPart, translated_descriptor->u.Memory.Start.HighPart, translated_descriptor->u.Memory.Length);
+      FUNCTION_MSG("Memory flags = %04X\n", translated_descriptor->Flags);
       xpdd->platform_mmio_addr = translated_descriptor->u.Memory.Start;
       xpdd->platform_mmio_len = translated_descriptor->u.Memory.Length;
       xpdd->platform_mmio_flags = translated_descriptor->Flags;
@@ -641,31 +641,31 @@ XenPci_EvtDevicePrepareHardware (WDFDEVICE device, WDFCMRESLIST resources_raw, W
 	    xpdd->irq_affinity = translated_descriptor->u.Interrupt.Affinity;
       xpdd->irq_mode = (translated_descriptor->Flags & CM_RESOURCE_INTERRUPT_LATCHED)?Latched:LevelSensitive;
       xpdd->irq_number = raw_descriptor->u.Interrupt.Vector;      
-      KdPrint((__DRIVER_NAME "     irq_number = %03x\n", raw_descriptor->u.Interrupt.Vector));
-      KdPrint((__DRIVER_NAME "     irq_vector = %03x\n", translated_descriptor->u.Interrupt.Vector));
-      KdPrint((__DRIVER_NAME "     irq_level = %03x\n", translated_descriptor->u.Interrupt.Level));
-      KdPrint((__DRIVER_NAME "     irq_mode = %s\n", (xpdd->irq_mode == Latched)?"Latched":"LevelSensitive"));
+      FUNCTION_MSG("irq_number = %03x\n", raw_descriptor->u.Interrupt.Vector);
+      FUNCTION_MSG("irq_vector = %03x\n", translated_descriptor->u.Interrupt.Vector);
+      FUNCTION_MSG("irq_level = %03x\n", translated_descriptor->u.Interrupt.Level);
+      FUNCTION_MSG("irq_mode = %s\n", (xpdd->irq_mode == Latched)?"Latched":"LevelSensitive");
       switch(translated_descriptor->ShareDisposition)
       {
       case CmResourceShareDeviceExclusive:
-        KdPrint((__DRIVER_NAME "     ShareDisposition = CmResourceShareDeviceExclusive\n"));
+        FUNCTION_MSG("ShareDisposition = CmResourceShareDeviceExclusive\n");
         break;
       case CmResourceShareDriverExclusive:
-        KdPrint((__DRIVER_NAME "     ShareDisposition = CmResourceShareDriverExclusive\n"));
+        FUNCTION_MSG("ShareDisposition = CmResourceShareDriverExclusive\n");
         break;
       case CmResourceShareShared:
-        KdPrint((__DRIVER_NAME "     ShareDisposition = CmResourceShareShared\n"));
+        FUNCTION_MSG("ShareDisposition = CmResourceShareShared\n");
         break;
       default:
-        KdPrint((__DRIVER_NAME "     ShareDisposition = %d\n", translated_descriptor->ShareDisposition));
+        FUNCTION_MSG("ShareDisposition = %d\n", translated_descriptor->ShareDisposition);
         break;
       }
       break;
     case CmResourceTypeDevicePrivate:
-      KdPrint((__DRIVER_NAME "     Private Data: 0x%02x 0x%02x 0x%02x\n", translated_descriptor->u.DevicePrivate.Data[0], translated_descriptor->u.DevicePrivate.Data[1], translated_descriptor->u.DevicePrivate.Data[2]));
+      FUNCTION_MSG("Private Data: 0x%02x 0x%02x 0x%02x\n", translated_descriptor->u.DevicePrivate.Data[0], translated_descriptor->u.DevicePrivate.Data[1], translated_descriptor->u.DevicePrivate.Data[2]);
       break;
     default:
-      KdPrint((__DRIVER_NAME "     Unhandled resource type (0x%x)\n", translated_descriptor->Type));
+      FUNCTION_MSG("Unhandled resource type (0x%x)\n", translated_descriptor->Type);
       break;
     }
   }
@@ -687,25 +687,25 @@ XenPci_EvtDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previous_state)
   switch (previous_state)
   {
   case WdfPowerDeviceD0:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD1\n"));
+    FUNCTION_MSG("WdfPowerDeviceD1\n");
     break;
   case WdfPowerDeviceD1:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD1\n"));
+    FUNCTION_MSG("WdfPowerDeviceD1\n");
     break;
   case WdfPowerDeviceD2:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD2\n"));
+    FUNCTION_MSG("WdfPowerDeviceD2\n");
     break;
   case WdfPowerDeviceD3:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD3\n"));
+    FUNCTION_MSG("WdfPowerDeviceD3\n");
     break;
   case WdfPowerDeviceD3Final:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD3Final\n"));
+    FUNCTION_MSG("WdfPowerDeviceD3Final\n");
     break;
   case WdfPowerDevicePrepareForHibernation:
-    KdPrint((__DRIVER_NAME "     WdfPowerDevicePrepareForHibernation\n"));
+    FUNCTION_MSG("WdfPowerDevicePrepareForHibernation\n");
     break;  
   default:
-    KdPrint((__DRIVER_NAME "     Unknown WdfPowerDevice state %d\n", previous_state));
+    FUNCTION_MSG("Unknown WdfPowerDevice state %d\n", previous_state);
     break;  
   }
 
@@ -789,30 +789,30 @@ XenPci_EvtDeviceD0ExitPreInterruptsDisabled(WDFDEVICE device, WDF_POWER_DEVICE_S
   switch (target_state)
   {
   case WdfPowerDeviceD0:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD1\n"));
+    FUNCTION_MSG("WdfPowerDeviceD1\n");
     break;
   case WdfPowerDeviceD1:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD1\n"));
+    FUNCTION_MSG("WdfPowerDeviceD1\n");
     break;
   case WdfPowerDeviceD2:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD2\n"));
+    FUNCTION_MSG("WdfPowerDeviceD2\n");
     break;
   case WdfPowerDeviceD3:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD3\n"));
+    FUNCTION_MSG("WdfPowerDeviceD3\n");
     break;
   case WdfPowerDeviceD3Final:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD3Final\n"));
+    FUNCTION_MSG("WdfPowerDeviceD3Final\n");
     break;
   case WdfPowerDevicePrepareForHibernation:
-    KdPrint((__DRIVER_NAME "     WdfPowerDevicePrepareForHibernation\n"));
+    FUNCTION_MSG("WdfPowerDevicePrepareForHibernation\n");
     break;
   default:
-    KdPrint((__DRIVER_NAME "     Unknown WdfPowerDevice state %d\n", target_state));
+    FUNCTION_MSG("Unknown WdfPowerDevice state %d\n", target_state);
     break;  
   }
 
   if (target_state == WdfPowerDeviceD3Final) {
-    KdPrint((__DRIVER_NAME "     Shutting down threads\n"));
+    FUNCTION_MSG("Shutting down threads\n");
 
     xpdd->balloon_shutdown = TRUE;
     KeSetEvent(&xpdd->balloon_event, IO_NO_INCREMENT, FALSE);
@@ -821,7 +821,7 @@ XenPci_EvtDeviceD0ExitPreInterruptsDisabled(WDFDEVICE device, WDF_POWER_DEVICE_S
     while ((status = KeWaitForSingleObject(xpdd->balloon_thread, Executive, KernelMode, FALSE, &timeout)) != STATUS_SUCCESS)
     {
       timeout.QuadPart = (LONGLONG)-1 * 1000 * 1000 * 10;
-      KdPrint((__DRIVER_NAME "     Waiting for balloon thread to stop\n"));
+      FUNCTION_MSG("Waiting for balloon thread to stop\n");
     }
     ObDereferenceObject(xpdd->balloon_thread);
 
@@ -846,26 +846,26 @@ XenPci_EvtDeviceD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE target_state) {
 
   switch (target_state) {
   case WdfPowerDeviceD0:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD1\n"));
+    FUNCTION_MSG("WdfPowerDeviceD1\n");
     break;
   case WdfPowerDeviceD1:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD1\n"));
+    FUNCTION_MSG("WdfPowerDeviceD1\n");
     break;
   case WdfPowerDeviceD2:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD2\n"));
+    FUNCTION_MSG("WdfPowerDeviceD2\n");
     break;
   case WdfPowerDeviceD3:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD3\n"));
+    FUNCTION_MSG("WdfPowerDeviceD3\n");
     break;
   case WdfPowerDeviceD3Final:
-    KdPrint((__DRIVER_NAME "     WdfPowerDeviceD3Final\n"));
+    FUNCTION_MSG("WdfPowerDeviceD3Final\n");
     break;
   case WdfPowerDevicePrepareForHibernation:
-    KdPrint((__DRIVER_NAME "     WdfPowerDevicePrepareForHibernation\n"));
+    FUNCTION_MSG("WdfPowerDevicePrepareForHibernation\n");
     xpdd->hibernated = TRUE;
     break;  
   default:
-    KdPrint((__DRIVER_NAME "     Unknown WdfPowerDevice state %d\n", target_state));
+    FUNCTION_MSG("Unknown WdfPowerDevice state %d\n", target_state);
     break;  
   }
   
@@ -943,7 +943,7 @@ XenPci_EvtChildListScanForChildren(WDFCHILDLIST child_list)
           RtlZeroMemory(&child_description, sizeof(child_description));
           WDF_CHILD_IDENTIFICATION_DESCRIPTION_HEADER_INIT(&child_description.header, sizeof(child_description));
           RtlStringCbPrintfA(path, ARRAY_SIZE(path), "device/%s/%s", devices[i], instances[j]);
-          KdPrint((__DRIVER_NAME "     Found path = %s\n", path));
+          FUNCTION_MSG("Found path = %s\n", path);
           RtlStringCbCopyA(child_description.path, ARRAY_SIZE(child_description.path), path);
           RtlStringCbCopyA(child_description.device, ARRAY_SIZE(child_description.device), devices[i]);
           child_description.index = atoi(instances[j]);
@@ -973,7 +973,7 @@ XenPci_EvtChildListScanForChildren(WDFCHILDLIST child_list)
               }
               if (xppdd->backend_state == XenbusStateClosing || xppdd->backend_state == XenbusStateClosed)
               {
-                KdPrint((__DRIVER_NAME "     Surprise removing %s due to backend initiated remove\n", path));
+                FUNCTION_MSG("Surprise removing %s due to backend initiated remove\n", path);
                 XenPci_FreeMem(instances[j]);
                 continue;
               }
@@ -988,7 +988,7 @@ XenPci_EvtChildListScanForChildren(WDFCHILDLIST child_list)
           status = WdfChildListAddOrUpdateChildDescriptionAsPresent(child_list, &child_description.header, NULL);
           if (!NT_SUCCESS(status))
           {
-            KdPrint((__DRIVER_NAME "     WdfChildListAddOrUpdateChildDescriptionAsPresent failed with status 0x%08x\n", status));
+            FUNCTION_MSG("WdfChildListAddOrUpdateChildDescriptionAsPresent failed with status 0x%08x\n", status);
           }
           XenPci_FreeMem(instances[j]);
         }
@@ -997,7 +997,7 @@ XenPci_EvtChildListScanForChildren(WDFCHILDLIST child_list)
       else
       {
         // wtf do we do here???
-        KdPrint((__DRIVER_NAME "     Failed to list %s tree\n", devices[i]));
+        FUNCTION_MSG("Failed to list %s tree\n", devices[i]);
       }
       XenPci_FreeMem(devices[i]);
     }
@@ -1006,7 +1006,7 @@ XenPci_EvtChildListScanForChildren(WDFCHILDLIST child_list)
   else
   {
     // wtf do we do here???
-    KdPrint((__DRIVER_NAME "     Failed to list device tree\n"));
+    FUNCTION_MSG("Failed to list device tree\n");
   }
 
   WdfChildListEndScan(child_list);
