@@ -199,6 +199,12 @@ typedef struct
   ULONG reset_counter;
 } xenusb_port_t;
 
+#define DEVICE_STATE_DISCONNECTED  0 /* -> INITIALISING */
+#define DEVICE_STATE_INITIALISING  1 /* -> ACTIVE or INACTIVE */
+#define DEVICE_STATE_INACTIVE      2
+#define DEVICE_STATE_ACTIVE        3 /* -> DISCONNECTING */
+#define DEVICE_STATE_DISCONNECTING 4 /* -> DISCONNECTED */
+
 /*
 TODO: this driver crashes under checked build of windows (or probably just checked usbhub.sys)
 Needs a magic number of (ULONG)'HUBx' at the start of BusContext
@@ -213,8 +219,15 @@ typedef struct {
   WDFQUEUE io_queue;
   WDFQUEUE pvurb_queue;
   WDFCHILDLIST child_list;
+  PDEVICE_OBJECT pdo;
   
   WDFDEVICE root_hub_device;
+
+  XN_HANDLE handle;
+  ULONG device_state;
+  ULONG backend_state;
+  KEVENT backend_event;
+  KDPC event_dpc;
 
   struct stack_state *req_id_ss;
   partial_pvurb_t *partial_pvurbs[MAX_REQ_ID_COUNT];
@@ -228,19 +241,18 @@ typedef struct {
   KSPIN_LOCK urb_ring_lock;
   usbif_urb_sring_t *urb_sring;
   usbif_urb_front_ring_t urb_ring;
+  grant_ref_t urb_sring_gref;
+
   LIST_ENTRY partial_pvurb_queue;
   LIST_ENTRY partial_pvurb_ring;
 
   KSPIN_LOCK conn_ring_lock;
   usbif_conn_sring_t *conn_sring;
   usbif_conn_front_ring_t conn_ring;
+  grant_ref_t conn_sring_gref;
 
   domid_t backend_id;
   evtchn_port_t event_channel;
-
-  XENPCI_VECTORS vectors;
-  PXENPCI_DEVICE_STATE device_state;
-
 } XENUSB_DEVICE_DATA, *PXENUSB_DEVICE_DATA;
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(XENUSB_DEVICE_DATA, GetXudd)
@@ -285,7 +297,7 @@ static uint16_t
 get_id_from_freelist(struct stack_state *ss) {
   ULONG_PTR _id;
   if (!stack_pop(ss, (VOID *)&_id)) {
-    KdPrint((__DRIVER_NAME "     No more id's\n"));
+    FUNCTION_MSG("No more id's\n");
     return (uint16_t)-1;
   }
   return (uint16_t)_id;
@@ -298,11 +310,9 @@ put_id_on_freelist(struct stack_state *ss, uint16_t id) {
 }
 
 static
-ULONGLONG parse_numeric_string(PCHAR string)
-{
+ULONGLONG parse_numeric_string(PCHAR string) {
   ULONGLONG val = 0;
-  while (*string != 0)
-  {
+  while (*string != 0) {
     val = val * 10 + (*string - '0');
     string++;
   }

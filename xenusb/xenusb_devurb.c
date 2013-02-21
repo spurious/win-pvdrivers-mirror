@@ -71,13 +71,13 @@ XenUsb_CompletionBulkInterrupt(
   WdfRequestGetParameters(request, &wrp);
   urb = (PURB)wrp.Parameters.Others.Arg1;
   ASSERT(urb);
-  KdPrint((__DRIVER_NAME "     URB_FUNCTION_BULK_OR_INTERRUPT_TRANSFER\n"));
-  KdPrint((__DRIVER_NAME "     rsp id = %d\n", pvurb->rsp.id));
-  KdPrint((__DRIVER_NAME "     rsp start_frame = %d\n", pvurb->rsp.start_frame));
-  KdPrint((__DRIVER_NAME "     rsp status = %d\n", pvurb->rsp.status));
-  KdPrint((__DRIVER_NAME "     rsp actual_length = %d\n", pvurb->rsp.actual_length));
-  KdPrint((__DRIVER_NAME "     rsp error_count = %d\n", pvurb->rsp.error_count));
-  KdPrint((__DRIVER_NAME "     total_length = %d\n", pvurb->total_length));
+  FUNCTION_MSG("URB_FUNCTION_BULK_OR_INTERRUPT_TRANSFER\n");
+  FUNCTION_MSG("rsp id = %d\n", pvurb->rsp.id);
+  FUNCTION_MSG("rsp start_frame = %d\n", pvurb->rsp.start_frame);
+  FUNCTION_MSG("rsp status = %d\n", pvurb->rsp.status);
+  FUNCTION_MSG("rsp actual_length = %d\n", pvurb->rsp.actual_length);
+  FUNCTION_MSG("rsp error_count = %d\n", pvurb->rsp.error_count);
+  FUNCTION_MSG("total_length = %d\n", pvurb->total_length);
   urb->UrbHeader.Status = XenUsb_GetUsbdStatusFromPvStatus(pvurb->rsp.status);
   urb->UrbBulkOrInterruptTransfer.TransferBufferLength = (ULONG)params->IoStatus.Information;
   if (urb->UrbHeader.Status == USBD_STATUS_SUCCESS)
@@ -129,12 +129,12 @@ XenUsb_EvtIoInternalDeviceControl_DEVICE_SUBMIT_URB(
   urb = (PURB)wrp.Parameters.Others.Arg1;
   ASSERT(urb);
 #if 0
-  KdPrint((__DRIVER_NAME "     urb = %p\n", urb));
-  KdPrint((__DRIVER_NAME "      Length = %d\n", urb->UrbHeader.Length));
-  KdPrint((__DRIVER_NAME "      Function = %d\n", urb->UrbHeader.Function));
-  KdPrint((__DRIVER_NAME "      Status = %d\n", urb->UrbHeader.Status));
-  KdPrint((__DRIVER_NAME "      UsbdDeviceHandle = %p\n", urb->UrbHeader.UsbdDeviceHandle));
-  KdPrint((__DRIVER_NAME "      UsbdFlags = %08x\n", urb->UrbHeader.UsbdFlags));
+  FUNCTION_MSG("urb = %p\n", urb);
+  FUNCTION_MSG(" Length = %d\n", urb->UrbHeader.Length);
+  FUNCTION_MSG(" Function = %d\n", urb->UrbHeader.Function);
+  FUNCTION_MSG(" Status = %d\n", urb->UrbHeader.Status);
+  FUNCTION_MSG(" UsbdDeviceHandle = %p\n", urb->UrbHeader.UsbdDeviceHandle);
+  FUNCTION_MSG(" UsbdFlags = %08x\n", urb->UrbHeader.UsbdFlags);
 #endif
   usb_device = urb->UrbHeader.UsbdDeviceHandle;
 
@@ -170,18 +170,18 @@ XenUsb_EvtIoInternalDeviceControl_DEVICE_SUBMIT_URB(
   switch(urb->UrbHeader.Function)
   {
   case URB_FUNCTION_SELECT_CONFIGURATION:
-    KdPrint((__DRIVER_NAME "     URB_FUNCTION_SELECT_CONFIGURATION\n"));
-    KdPrint((__DRIVER_NAME "      ConfigurationDescriptor = %p\n", urb->UrbSelectConfiguration.ConfigurationDescriptor));
+    FUNCTION_MSG("URB_FUNCTION_SELECT_CONFIGURATION\n");
+    FUNCTION_MSG(" ConfigurationDescriptor = %p\n", urb->UrbSelectConfiguration.ConfigurationDescriptor);
     if (urb->UrbSelectConfiguration.ConfigurationDescriptor)
     {
-      KdPrint((__DRIVER_NAME "       bLength = %d\n", urb->UrbSelectConfiguration.ConfigurationDescriptor->bLength));
-      KdPrint((__DRIVER_NAME "       bDescriptorType = %d\n", urb->UrbSelectConfiguration.ConfigurationDescriptor->bDescriptorType));
-      KdPrint((__DRIVER_NAME "       wTotalLength = %d\n", urb->UrbSelectConfiguration.ConfigurationDescriptor->wTotalLength));
-      KdPrint((__DRIVER_NAME "       bNumInterfaces = %d\n", urb->UrbSelectConfiguration.ConfigurationDescriptor->bNumInterfaces));
-      KdPrint((__DRIVER_NAME "       bConfigurationValue = %d\n", urb->UrbSelectConfiguration.ConfigurationDescriptor->bConfigurationValue));
-      KdPrint((__DRIVER_NAME "       iConfiguration = %d\n", urb->UrbSelectConfiguration.ConfigurationDescriptor->iConfiguration));
-      KdPrint((__DRIVER_NAME "       bmAttributes = %04x\n", urb->UrbSelectConfiguration.ConfigurationDescriptor->bmAttributes));
-      KdPrint((__DRIVER_NAME "       MaxPower = %d\n", urb->UrbSelectConfiguration.ConfigurationDescriptor->MaxPower));
+      FUNCTION_MSG("  bLength = %d\n", urb->UrbSelectConfiguration.ConfigurationDescriptor->bLength);
+      FUNCTION_MSG("  bDescriptorType = %d\n", urb->UrbSelectConfiguration.ConfigurationDescriptor->bDescriptorType);
+      FUNCTION_MSG("  wTotalLength = %d\n", urb->UrbSelectConfiguration.ConfigurationDescriptor->wTotalLength);
+      FUNCTION_MSG("  bNumInterfaces = %d\n", urb->UrbSelectConfiguration.ConfigurationDescriptor->bNumInterfaces);
+      FUNCTION_MSG("  bConfigurationValue = %d\n", urb->UrbSelectConfiguration.ConfigurationDescriptor->bConfigurationValue);
+      FUNCTION_MSG("  iConfiguration = %d\n", urb->UrbSelectConfiguration.ConfigurationDescriptor->iConfiguration);
+      FUNCTION_MSG("  bmAttributes = %04x\n", urb->UrbSelectConfiguration.ConfigurationDescriptor->bmAttributes);
+      FUNCTION_MSG("  MaxPower = %d\n", urb->UrbSelectConfiguration.ConfigurationDescriptor->MaxPower);
     }
     if (urb->UrbSelectConfiguration.ConfigurationDescriptor)
     {
@@ -204,26 +204,26 @@ XenUsb_EvtIoInternalDeviceControl_DEVICE_SUBMIT_URB(
         interface_information->SubClass = usb_interface->interface_descriptor.bInterfaceSubClass;
         interface_information->Protocol = usb_interface->interface_descriptor.bInterfaceProtocol;
         interface_information->InterfaceHandle = usb_interface;
-        KdPrint((__DRIVER_NAME "     InterfaceInformation[%d]\n", i));
-        KdPrint((__DRIVER_NAME "      Length = %d\n", interface_information->Length));
-        KdPrint((__DRIVER_NAME "      InterfaceNumber = %d\n", interface_information->InterfaceNumber));
-        KdPrint((__DRIVER_NAME "      AlternateSetting = %d\n", interface_information->AlternateSetting));
-        KdPrint((__DRIVER_NAME "      Class = %02x\n", (ULONG)interface_information->Class));
-        KdPrint((__DRIVER_NAME "      SubClass = %02x\n", (ULONG)interface_information->SubClass));
-        KdPrint((__DRIVER_NAME "      Protocol = %02x\n", (ULONG)interface_information->Protocol));
-        KdPrint((__DRIVER_NAME "      InterfaceHandle = %p\n", interface_information->InterfaceHandle));
-        KdPrint((__DRIVER_NAME "      NumberOfPipes = %d\n", interface_information->NumberOfPipes));
+        FUNCTION_MSG("InterfaceInformation[%d]\n", i);
+        FUNCTION_MSG(" Length = %d\n", interface_information->Length);
+        FUNCTION_MSG(" InterfaceNumber = %d\n", interface_information->InterfaceNumber);
+        FUNCTION_MSG(" AlternateSetting = %d\n", interface_information->AlternateSetting);
+        FUNCTION_MSG(" Class = %02x\n", (ULONG)interface_information->Class);
+        FUNCTION_MSG(" SubClass = %02x\n", (ULONG)interface_information->SubClass);
+        FUNCTION_MSG(" Protocol = %02x\n", (ULONG)interface_information->Protocol);
+        FUNCTION_MSG(" InterfaceHandle = %p\n", interface_information->InterfaceHandle);
+        FUNCTION_MSG(" NumberOfPipes = %d\n", interface_information->NumberOfPipes);
         for (j = 0; j < interface_information->NumberOfPipes; j++)
         {
           xenusb_endpoint_t *usb_endpoint = usb_interface->endpoints[j];
-          KdPrint((__DRIVER_NAME "      Pipe[%d] (before)\n", j));
-          KdPrint((__DRIVER_NAME "       MaximumPacketSize = %d\n", interface_information->Pipes[j].MaximumPacketSize));
-          KdPrint((__DRIVER_NAME "       EndpointAddress = %d\n", interface_information->Pipes[j].EndpointAddress));
-          KdPrint((__DRIVER_NAME "       Interval = %d\n", interface_information->Pipes[j].Interval));
-          KdPrint((__DRIVER_NAME "       PipeType = %d\n", interface_information->Pipes[j].PipeType));
-          KdPrint((__DRIVER_NAME "       PipeHandle = %p\n", interface_information->Pipes[j].PipeHandle));
-          KdPrint((__DRIVER_NAME "       MaximumTransferSize = %d\n", interface_information->Pipes[j].MaximumTransferSize));
-          KdPrint((__DRIVER_NAME "       PipeFlags = %08x\n", interface_information->Pipes[j].PipeFlags));
+          FUNCTION_MSG(" Pipe[%d] (before)\n", j);
+          FUNCTION_MSG("  MaximumPacketSize = %d\n", interface_information->Pipes[j].MaximumPacketSize);
+          FUNCTION_MSG("  EndpointAddress = %d\n", interface_information->Pipes[j].EndpointAddress);
+          FUNCTION_MSG("  Interval = %d\n", interface_information->Pipes[j].Interval);
+          FUNCTION_MSG("  PipeType = %d\n", interface_information->Pipes[j].PipeType);
+          FUNCTION_MSG("  PipeHandle = %p\n", interface_information->Pipes[j].PipeHandle);
+          FUNCTION_MSG("  MaximumTransferSize = %d\n", interface_information->Pipes[j].MaximumTransferSize);
+          FUNCTION_MSG("  PipeFlags = %08x\n", interface_information->Pipes[j].PipeFlags);
           interface_information->Pipes[j].MaximumPacketSize = usb_endpoint->endpoint_descriptor.wMaxPacketSize;
           interface_information->Pipes[j].EndpointAddress = usb_endpoint->endpoint_descriptor.bEndpointAddress;
           interface_information->Pipes[j].Interval = usb_endpoint->endpoint_descriptor.bInterval;
@@ -247,14 +247,14 @@ XenUsb_EvtIoInternalDeviceControl_DEVICE_SUBMIT_URB(
             break;
           }
           interface_information->Pipes[j].PipeHandle = usb_endpoint;
-          KdPrint((__DRIVER_NAME "      Pipe[%d] (after)\n", j));
-          KdPrint((__DRIVER_NAME "       MaximumPacketSize = %d\n", interface_information->Pipes[j].MaximumPacketSize));
-          KdPrint((__DRIVER_NAME "       EndpointAddress = %d\n", interface_information->Pipes[j].EndpointAddress));
-          KdPrint((__DRIVER_NAME "       Interval = %d\n", interface_information->Pipes[j].Interval));
-          KdPrint((__DRIVER_NAME "       PipeType = %d\n", interface_information->Pipes[j].PipeType));
-          KdPrint((__DRIVER_NAME "       PipeHandle = %p\n", interface_information->Pipes[j].PipeHandle));
-          KdPrint((__DRIVER_NAME "       MaximumTransferSize = %d\n", interface_information->Pipes[j].MaximumTransferSize));
-          KdPrint((__DRIVER_NAME "       PipeFlags = %08x\n", interface_information->Pipes[j].PipeFlags));
+          FUNCTION_MSG(" Pipe[%d] (after)\n", j);
+          FUNCTION_MSG("  MaximumPacketSize = %d\n", interface_information->Pipes[j].MaximumPacketSize);
+          FUNCTION_MSG("  EndpointAddress = %d\n", interface_information->Pipes[j].EndpointAddress);
+          FUNCTION_MSG("  Interval = %d\n", interface_information->Pipes[j].Interval);
+          FUNCTION_MSG("  PipeType = %d\n", interface_information->Pipes[j].PipeType);
+          FUNCTION_MSG("  PipeHandle = %p\n", interface_information->Pipes[j].PipeHandle);
+          FUNCTION_MSG("  MaximumTransferSize = %d\n", interface_information->Pipes[j].MaximumTransferSize);
+          FUNCTION_MSG("  PipeFlags = %08x\n", interface_information->Pipes[j].PipeFlags);
         }
         interface_information = (PUSBD_INTERFACE_INFORMATION)((PUCHAR)interface_information + interface_information->Length);
       }
@@ -293,28 +293,28 @@ XenUsb_EvtIoInternalDeviceControl_DEVICE_SUBMIT_URB(
     }
     break;
   case URB_FUNCTION_SELECT_INTERFACE:
-    KdPrint((__DRIVER_NAME "     URB_FUNCTION_SELECT_INTERFACE\n"));
+    FUNCTION_MSG("URB_FUNCTION_SELECT_INTERFACE\n");
     interface_information = &urb->UrbSelectInterface.Interface;
-    KdPrint((__DRIVER_NAME "     InterfaceInformation\n"));
-    KdPrint((__DRIVER_NAME "      Length = %d\n", interface_information->Length));
-    KdPrint((__DRIVER_NAME "      InterfaceNumber = %d\n", interface_information->InterfaceNumber));
-    KdPrint((__DRIVER_NAME "      AlternateSetting = %d\n", interface_information->AlternateSetting));
-    KdPrint((__DRIVER_NAME "      Class = %02x\n", (ULONG)interface_information->Class));
-    KdPrint((__DRIVER_NAME "      SubClass = %02x\n", (ULONG)interface_information->SubClass));
-    KdPrint((__DRIVER_NAME "      Protocol = %02x\n", (ULONG)interface_information->Protocol));
-    KdPrint((__DRIVER_NAME "      Reserved = %02x\n", (ULONG)interface_information->Reserved));
-    KdPrint((__DRIVER_NAME "      InterfaceHandle = %p\n", interface_information->InterfaceHandle));
-    KdPrint((__DRIVER_NAME "      NumberOfPipes = %d\n", interface_information->NumberOfPipes));
+    FUNCTION_MSG("InterfaceInformation\n");
+    FUNCTION_MSG(" Length = %d\n", interface_information->Length);
+    FUNCTION_MSG(" InterfaceNumber = %d\n", interface_information->InterfaceNumber);
+    FUNCTION_MSG(" AlternateSetting = %d\n", interface_information->AlternateSetting);
+    FUNCTION_MSG(" Class = %02x\n", (ULONG)interface_information->Class);
+    FUNCTION_MSG(" SubClass = %02x\n", (ULONG)interface_information->SubClass);
+    FUNCTION_MSG(" Protocol = %02x\n", (ULONG)interface_information->Protocol);
+    FUNCTION_MSG(" Reserved = %02x\n", (ULONG)interface_information->Reserved);
+    FUNCTION_MSG(" InterfaceHandle = %p\n", interface_information->InterfaceHandle);
+    FUNCTION_MSG(" NumberOfPipes = %d\n", interface_information->NumberOfPipes);
     for (i = 0; i < interface_information->NumberOfPipes; i++)
     {
-      KdPrint((__DRIVER_NAME "      Pipe[%d]\n", i));
-      KdPrint((__DRIVER_NAME "       MaximumPacketSize = %d\n", interface_information->Pipes[i].MaximumPacketSize));
-      KdPrint((__DRIVER_NAME "       EndpointAddress = %d\n", interface_information->Pipes[i].EndpointAddress));
-      KdPrint((__DRIVER_NAME "       Interval = %d\n", interface_information->Pipes[i].Interval));
-      KdPrint((__DRIVER_NAME "       PipeType = %d\n", interface_information->Pipes[i].PipeType));
-      KdPrint((__DRIVER_NAME "       PipeHandle = %p\n", interface_information->Pipes[i].PipeHandle));
-      KdPrint((__DRIVER_NAME "       MaximumTransferSize = %d\n", interface_information->Pipes[i].MaximumTransferSize));
-      KdPrint((__DRIVER_NAME "       PipeFlags = %08x\n", interface_information->Pipes[i].PipeFlags));
+      FUNCTION_MSG(" Pipe[%d]\n", i);
+      FUNCTION_MSG("  MaximumPacketSize = %d\n", interface_information->Pipes[i].MaximumPacketSize);
+      FUNCTION_MSG("  EndpointAddress = %d\n", interface_information->Pipes[i].EndpointAddress);
+      FUNCTION_MSG("  Interval = %d\n", interface_information->Pipes[i].Interval);
+      FUNCTION_MSG("  PipeType = %d\n", interface_information->Pipes[i].PipeType);
+      FUNCTION_MSG("  PipeHandle = %p\n", interface_information->Pipes[i].PipeHandle);
+      FUNCTION_MSG("  MaximumTransferSize = %d\n", interface_information->Pipes[i].MaximumTransferSize);
+      FUNCTION_MSG("  PipeFlags = %08x\n", interface_information->Pipes[i].PipeFlags);
     }
 
     pvurb = &local_pvurb; //ExAllocatePoolWithTag(NonPagedPool, sizeof(*pvurb), XENUSB_POOL_TAG);
@@ -433,13 +433,13 @@ XenUsb_EvtIoInternalDeviceControl_DEVICE_SUBMIT_URB(
     switch(endpoint->endpoint_descriptor.bmAttributes & USB_ENDPOINT_TYPE_MASK)
     {
     case USB_ENDPOINT_TYPE_BULK:
-      KdPrint((__DRIVER_NAME "      USB_ENDPOINT_TYPE_BULK\n"));
+      FUNCTION_MSG(" USB_ENDPOINT_TYPE_BULK\n");
       break;
     case USB_ENDPOINT_TYPE_INTERRUPT:
-      KdPrint((__DRIVER_NAME "      USB_ENDPOINT_TYPE_INTERRUPT\n"));
+      FUNCTION_MSG(" USB_ENDPOINT_TYPE_INTERRUPT\n");
       break;
     default:
-      KdPrint((__DRIVER_NAME "      USB_ENDPOINT_TYPE_%d\n", endpoint->endpoint_descriptor.bmAttributes));
+      FUNCTION_MSG(" USB_ENDPOINT_TYPE_%d\n", endpoint->endpoint_descriptor.bmAttributes);
       break;
     }
     if (urb->UrbBulkOrInterruptTransfer.TransferBuffer) {
@@ -464,8 +464,8 @@ XenUsb_EvtIoInternalDeviceControl_DEVICE_SUBMIT_URB(
     }
     break;
   case URB_FUNCTION_SYNC_RESET_PIPE_AND_CLEAR_STALL:
-    KdPrint((__DRIVER_NAME "     URB_FUNCTION_SYNC_RESET_PIPE_AND_CLEAR_STALL\n"));
-    KdPrint((__DRIVER_NAME "      PipeHandle = %p\n", urb->UrbPipeRequest.PipeHandle));
+    FUNCTION_MSG("URB_FUNCTION_SYNC_RESET_PIPE_AND_CLEAR_STALL\n");
+    FUNCTION_MSG(" PipeHandle = %p\n", urb->UrbPipeRequest.PipeHandle);
     /* we only clear the stall here */
     endpoint = urb->UrbBulkOrInterruptTransfer.PipeHandle;
 
@@ -499,14 +499,14 @@ XenUsb_EvtIoInternalDeviceControl_DEVICE_SUBMIT_URB(
     }
     break;
   case URB_FUNCTION_ABORT_PIPE:
-    KdPrint((__DRIVER_NAME "     URB_FUNCTION_ABORT_PIPE\n"));
-    KdPrint((__DRIVER_NAME "      PipeHandle = %p\n", urb->UrbPipeRequest.PipeHandle));
+    FUNCTION_MSG("URB_FUNCTION_ABORT_PIPE\n");
+    FUNCTION_MSG(" PipeHandle = %p\n", urb->UrbPipeRequest.PipeHandle);
     /* just fake this.... i think we really need to flush any pending requests too */
     urb->UrbHeader.Status = USBD_STATUS_SUCCESS;
     WdfRequestComplete(request, STATUS_SUCCESS);
     break;
   default:
-    KdPrint((__DRIVER_NAME "     URB_FUNCTION_%04x\n", urb->UrbHeader.Function));
+    FUNCTION_MSG("URB_FUNCTION_%04x\n", urb->UrbHeader.Function);
     urb->UrbHeader.Status = USBD_STATUS_INVALID_URB_FUNCTION;
     WdfRequestComplete(request, STATUS_UNSUCCESSFUL);
     break;

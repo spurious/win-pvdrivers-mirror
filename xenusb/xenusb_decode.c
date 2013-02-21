@@ -190,7 +190,7 @@ XenUsb_DecodeControlUrb(PURB urb, urb_decode_t *decode_data)
   switch(urb->UrbHeader.Function)
   {
   case URB_FUNCTION_SELECT_CONFIGURATION:
-    KdPrint((__DRIVER_NAME "     URB_FUNCTION_SELECT_CONFIGURATION\n"));
+    FUNCTION_MSG("URB_FUNCTION_SELECT_CONFIGURATION\n");
     decode_data->setup_packet.default_pipe_setup_packet.bmRequestType.Recipient = BMREQUEST_TO_DEVICE;
     decode_data->setup_packet.default_pipe_setup_packet.bmRequestType.Type = BMREQUEST_STANDARD;
     decode_data->setup_packet.default_pipe_setup_packet.bmRequestType.Dir = BMREQUEST_HOST_TO_DEVICE;
@@ -204,7 +204,7 @@ XenUsb_DecodeControlUrb(PURB urb, urb_decode_t *decode_data)
     retval = URB_DECODE_INCOMPLETE;
     break;
   case URB_FUNCTION_SELECT_INTERFACE:
-    KdPrint((__DRIVER_NAME "     URB_FUNCTION_SELECT_INTERFACE\n"));
+    FUNCTION_MSG("URB_FUNCTION_SELECT_INTERFACE\n");
     decode_data->setup_packet.default_pipe_setup_packet.bmRequestType.Recipient = BMREQUEST_TO_INTERFACE;
     decode_data->setup_packet.default_pipe_setup_packet.bmRequestType.Type = BMREQUEST_STANDARD;
     decode_data->setup_packet.default_pipe_setup_packet.bmRequestType.Dir = BMREQUEST_HOST_TO_DEVICE;
