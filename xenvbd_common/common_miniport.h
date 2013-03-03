@@ -681,6 +681,14 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
   PSRB_IO_CONTROL sic;
   ULONG prev_offset;
 
+  if (xvdd->device_state == DEVICE_STATE_ACTIVE) {
+    if (xvdd->new_total_sectors == -1L)
+      xvdd->new_total_sectors = xvdd->total_sectors;
+    if (xvdd->new_total_sectors != xvdd->total_sectors) {
+      xvdd->total_sectors = xvdd->new_total_sectors;
+      SxxxPortNotification(BusChangeDetected, xvdd, 0);
+    }
+  }
   while(!xvdd->aligned_buffer_in_use && xvdd->shadow_free && (srb_entry = (srb_list_entry_t *)RemoveHeadList(&xvdd->srb_list)) != (srb_list_entry_t *)&xvdd->srb_list) {
     srb = srb_entry->srb;
     prev_offset = srb_entry->offset;

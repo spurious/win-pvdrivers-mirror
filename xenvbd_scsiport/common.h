@@ -47,6 +47,7 @@ struct {
   ULONG bytes_per_sector; /* 512 for disk, 2048 for CDROM) */
   ULONG hw_bytes_per_sector; /* underlying hardware format, eg 4K */
   ULONGLONG total_sectors;
+  ULONGLONG new_total_sectors;
   ULONG feature_flush_cache;
   ULONG feature_discard;
   ULONG feature_barrier;

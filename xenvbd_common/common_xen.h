@@ -91,6 +91,7 @@ XenVbd_Connect(PXENVBD_DEVICE_DATA xvdd, BOOLEAN suspend) {
   }
 
   // TODO: some of this stuff should be read on first connect only, then only verified on resume
+  xvdd->new_total_sectors = (ULONGLONG)-1L;
   status = XnReadInt64(xvdd->handle, XN_BASE_BACKEND, "sectors", &xvdd->total_sectors);
   status = XnReadInt32(xvdd->handle, XN_BASE_BACKEND, "sector-size", &xvdd->hw_bytes_per_sector);
   if (xvdd->device_type == XENVBD_DEVICETYPE_CDROM) {
@@ -196,6 +197,7 @@ XenVbd_Disconnect(PVOID DeviceExtension, BOOLEAN suspend) {
   return STATUS_SUCCESS;
 }
 
+
 static VOID
 XenVbd_DeviceCallback(PVOID context, ULONG callback_type, PVOID value) {
   PXENVBD_DEVICE_DATA xvdd = (PXENVBD_DEVICE_DATA)context;
@@ -208,6 +210,11 @@ XenVbd_DeviceCallback(PVOID context, ULONG callback_type, PVOID value) {
     state = (ULONG)(ULONG_PTR)value;
     if (state == xvdd->backend_state) {
       FUNCTION_MSG("same state %d\n", state);
+      /* could be rewriting same state because of size change */
+      if (xvdd->backend_state == XenbusStateConnected) {
+        /* just set the new value - it will be noticed sooner or later */
+        XnReadInt64(xvdd->handle, XN_BASE_BACKEND, "sectors", &xvdd->new_total_sectors);
+      }
       FUNCTION_EXIT();
     }
     FUNCTION_MSG("XenBusState = %d -> %d\n", xvdd->backend_state, state);

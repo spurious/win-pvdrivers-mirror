@@ -71,6 +71,11 @@ XenVbd_NotificationNextLuRequest(PXENVBD_DEVICE_DATA xvdd, UCHAR PathId, UCHAR T
   ScsiPortNotification(NextLuRequest, xvdd->xvsd, PathId, TargetId, Lun);
 }
 
+VOID
+XenVbd_NotificationBusChangeDetected(PXENVBD_DEVICE_DATA xvdd, UCHAR PathId) {
+  ScsiPortNotification(BusChangeDetected, xvdd->xvsd, PathId);
+}
+
 #include "..\xenvbd_common\common_miniport.h"
 
 
