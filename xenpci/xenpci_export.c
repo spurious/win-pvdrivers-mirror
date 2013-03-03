@@ -32,6 +32,7 @@ XenPci_BackendStateCallback(char *path, PVOID context) {
   PCHAR err;
   PCHAR value;
   ULONG backend_state;
+  ULONG frontend_state;
   
   FUNCTION_ENTER();
   //RtlStringCbPrintfA(path, ARRAY_SIZE(path), "%s/state", xppdd->backend_path);
@@ -48,6 +49,28 @@ XenPci_BackendStateCallback(char *path, PVOID context) {
   FUNCTION_MSG("Read value=%s\n", value);
   backend_state = atoi(value);
   XenPci_FreeMem(value);
+  if (backend_state == XenbusStateClosing) {
+    /* check to see if transition to closing was initiated by backend */
+    CHAR frontend_state_path[128];
+    FUNCTION_MSG("backend path is closing. checking frontend path\n");
+    RtlStringCbCopyA(frontend_state_path, ARRAY_SIZE(frontend_state_path), xppdd->path);
+    RtlStringCbCatA(frontend_state_path, ARRAY_SIZE(frontend_state_path), "/state");
+    err = XenBus_Read(xpdd, XBT_NIL, frontend_state_path, &value);
+    if (err) {
+      FUNCTION_MSG("Error %s\n", err);
+      XenPci_FreeMem(err);
+      FUNCTION_EXIT();
+      return;
+    }
+    FUNCTION_MSG("Read value=%s\n", value);
+    frontend_state = atoi(value);
+    XenPci_FreeMem(value);
+    if (frontend_state == XenbusStateConnected) {
+      FUNCTION_MSG("initiated by backend. Requesting eject\n");
+      /* frontend is still connected. disconnection was initiated by backend */
+      WdfPdoRequestEject(xppdd->wdf_device);
+    }
+  }
   xppdd->device_callback(xppdd->device_callback_context, XN_DEVICE_CALLBACK_BACKEND_STATE, (PVOID)(ULONG_PTR)backend_state);
   FUNCTION_EXIT();
 }
