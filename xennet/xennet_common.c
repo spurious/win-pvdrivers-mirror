@@ -131,11 +131,18 @@ XenNet_ParsePacketHeader(packet_info_t *pi, PUCHAR alt_buffer, ULONG min_header_
 
   pi->header_length = 0;
   pi->curr_mdl_offset = pi->first_mdl_offset;
+  
+  pi->ip_proto = 0;
+  pi->ip_version = 0;
+  pi->ip4_header_length = 0;
+  pi->ip4_length = 0;
+  pi->tcp_header_length = 0;
+  pi->tcp_length = 0;
+  pi->split_required = 0;
 
   XenNet_BuildHeader(pi, NULL, min_header_size);
   
-  if (!XenNet_BuildHeader(pi, NULL, (ULONG)XN_HDR_SIZE))
-  {
+  if (!XenNet_BuildHeader(pi, NULL, (ULONG)XN_HDR_SIZE)) {
     //KdPrint((__DRIVER_NAME "     packet too small (Ethernet Header)\n"));
     pi->parse_result = PARSE_TOO_SMALL;
     return;
@@ -143,40 +150,31 @@ XenNet_ParsePacketHeader(packet_info_t *pi, PUCHAR alt_buffer, ULONG min_header_
 
   if (pi->header[0] == 0xFF && pi->header[1] == 0xFF
       && pi->header[2] == 0xFF && pi->header[3] == 0xFF
-      && pi->header[4] == 0xFF && pi->header[5] == 0xFF)
-  {
+      && pi->header[4] == 0xFF && pi->header[5] == 0xFF) {
     pi->is_broadcast = TRUE;
-  }
-  else if (pi->header[0] & 0x01)
-  {
+  } else if (pi->header[0] & 0x01) {
     pi->is_multicast = TRUE;
   }
 
-  switch (GET_NET_PUSHORT(&pi->header[12])) // L2 protocol field
-  {
+  switch (GET_NET_PUSHORT(&pi->header[12])) { // L2 protocol field
   case 0x0800: /* IPv4 */
     //KdPrint((__DRIVER_NAME "     IP\n"));
-    if (pi->header_length < (ULONG)(XN_HDR_SIZE + 20))
-    {
-      if (!XenNet_BuildHeader(pi, NULL, (ULONG)(XN_HDR_SIZE + 20)))
-      {
+    if (pi->header_length < (ULONG)(XN_HDR_SIZE + 20)) {
+      if (!XenNet_BuildHeader(pi, NULL, (ULONG)(XN_HDR_SIZE + 20))) {
         KdPrint((__DRIVER_NAME "     packet too small (IP Header)\n"));
         pi->parse_result = PARSE_TOO_SMALL;
         return;
       }
     }
     pi->ip_version = (pi->header[XN_HDR_SIZE + 0] & 0xF0) >> 4;
-    if (pi->ip_version != 4)
-    {
+    if (pi->ip_version != 4) {
       //KdPrint((__DRIVER_NAME "     ip_version = %d\n", pi->ip_version));
       pi->parse_result = PARSE_UNKNOWN_TYPE;
       return;
     }
     pi->ip4_header_length = (pi->header[XN_HDR_SIZE + 0] & 0x0F) << 2;
-    if (pi->header_length < (ULONG)(XN_HDR_SIZE + pi->ip4_header_length + 20))
-    {
-      if (!XenNet_BuildHeader(pi, NULL, (ULONG)(XN_HDR_SIZE + pi->ip4_header_length + 20)))
-      {
+    if (pi->header_length < (ULONG)(XN_HDR_SIZE + pi->ip4_header_length + 20)) {
+      if (!XenNet_BuildHeader(pi, NULL, (ULONG)(XN_HDR_SIZE + pi->ip4_header_length + 20))) {
         //KdPrint((__DRIVER_NAME "     packet too small (IP Header + IP Options + TCP Header)\n"));
         pi->parse_result = PARSE_TOO_SMALL;
         return;
@@ -196,8 +194,7 @@ XenNet_ParsePacketHeader(packet_info_t *pi, PUCHAR alt_buffer, ULONG min_header_
   pi->ip_proto = pi->header[XN_HDR_SIZE + 9];
   pi->ip4_length = GET_NET_PUSHORT(&pi->header[XN_HDR_SIZE + 2]);
   pi->ip_has_options = (BOOLEAN)(pi->ip4_header_length > 20);
-  switch (pi->ip_proto)
-  {
+  switch (pi->ip_proto) {
   case 6:  // TCP
   case 17: // UDP
     break;
@@ -208,19 +205,16 @@ XenNet_ParsePacketHeader(packet_info_t *pi, PUCHAR alt_buffer, ULONG min_header_
   }
   pi->tcp_header_length = (pi->header[XN_HDR_SIZE + pi->ip4_header_length + 12] & 0xf0) >> 2;
 
-  if (pi->header_length < (ULONG)(XN_HDR_SIZE + pi->ip4_header_length + pi->tcp_header_length))
-  {
+  if (pi->header_length < (ULONG)(XN_HDR_SIZE + pi->ip4_header_length + pi->tcp_header_length)) {
     /* we don't actually need the tcp options to analyse the header */
-    if (!XenNet_BuildHeader(pi, NULL, (ULONG)(XN_HDR_SIZE + pi->ip4_header_length + MIN_TCP_HEADER_LENGTH)))
-    {
+    if (!XenNet_BuildHeader(pi, NULL, (ULONG)(XN_HDR_SIZE + pi->ip4_header_length + MIN_TCP_HEADER_LENGTH))) {
       //KdPrint((__DRIVER_NAME "     packet too small (IP Header + IP Options + TCP Header (not including TCP Options))\n"));
       pi->parse_result = PARSE_TOO_SMALL;
       return;
     }
   }
 
-  if ((ULONG)XN_HDR_SIZE + pi->ip4_length > pi->total_length)
-  {
+  if ((ULONG)XN_HDR_SIZE + pi->ip4_length > pi->total_length) {
     //KdPrint((__DRIVER_NAME "     XN_HDR_SIZE + ip4_length (%d) > total_length (%d)\n", XN_HDR_SIZE + pi->ip4_length, pi->total_length));
     pi->parse_result = PARSE_UNKNOWN_TYPE;
     return;

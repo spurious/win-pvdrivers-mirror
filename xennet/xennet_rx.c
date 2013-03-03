@@ -408,9 +408,11 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
     }
     header_va = (PUCHAR)(header_buf + 1);
     NdisMoveMemory(header_va, pi->header, pi->header_length);
-    //KdPrint((__DRIVER_NAME "     header_length = %d, current_lookahead = %d\n", pi->header_length, xi->current_lookahead));
-    //KdPrint((__DRIVER_NAME "     ip4_header_length = %d\n", pi->ip4_header_length));
-    //KdPrint((__DRIVER_NAME "     tcp_header_length = %d\n", pi->tcp_header_length));
+    //if (pi->ip_proto == 50) {
+    //  FUNCTION_MSG("header_length = %d, current_lookahead = %d\n", pi->header_length, xi->current_lookahead);
+    //  FUNCTION_MSG("ip4_header_length = %d\n", pi->ip4_header_length);
+    //  FUNCTION_MSG("tcp_header_length = %d\n", pi->tcp_header_length);
+    //}
     /* make sure only the header is in the first buffer (or the entire packet, but that is done in the above case) */
     XenNet_BuildHeader(pi, header_va, MAX_ETH_HEADER_LENGTH + pi->ip4_header_length + pi->tcp_header_length);
     header_extra = pi->header_length - (MAX_ETH_HEADER_LENGTH + pi->ip4_header_length + pi->tcp_header_length);
@@ -432,6 +434,7 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
     #endif
 
     if (pi->split_required) {
+      /* must be ip4 */
       ULONG tcp_length;
       USHORT new_ip4_length;
       tcp_length = (USHORT)min(pi->mss, pi->tcp_remaining);
@@ -453,7 +456,9 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
       ULONG in_buffer_length;
       ULONG out_length;
       
-      //KdPrint((__DRIVER_NAME "     in loop - out_remaining = %d, curr_buffer = %p, curr_pb = %p\n", out_remaining, pi->curr_mdl, pi->curr_pb));
+      //if (pi->ip_proto == 50) {
+      //  FUNCTION_MSG("in loop - out_remaining = %d, curr_buffer = %p, curr_pb = %p\n", out_remaining, pi->curr_mdl, pi->curr_pb);
+      //}
       if (!pi->curr_mdl || !pi->curr_pb) {
         KdPrint((__DRIVER_NAME "     out of buffers for packet\n"));
         //KdPrint((__DRIVER_NAME "     out_remaining = %d, curr_buffer = %p, curr_pb = %p\n", out_remaining, pi->curr_mdl, pi->curr_pb));
@@ -617,13 +622,9 @@ static VOID
 XenNet_MakePackets(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi)
 {
   UCHAR psh;
-  //PNDIS_BUFFER buffer;
   shared_buffer_t *page_buf;
 
-  //FUNCTION_ENTER();
-
-  XenNet_ParsePacketHeader(pi, NULL, 0);
-  //pi->split_required = FALSE;
+  XenNet_ParsePacketHeader(pi, NULL, XN_HDR_SIZE + xi->current_lookahead);
 
   if (!XenNet_FilterAcceptPacket(xi, pi)) {
     goto done;
