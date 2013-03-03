@@ -30,9 +30,11 @@ static EVT_WDF_IO_QUEUE_IO_INTERNAL_DEVICE_CONTROL XenUsb_EvtIoInternalDeviceCon
 static EVT_WDF_IO_QUEUE_IO_INTERNAL_DEVICE_CONTROL XenUsb_EvtIoInternalDeviceControl_PVURB;
 static EVT_WDF_IO_QUEUE_IO_DEFAULT XenUsb_EvtIoDefault;
 static EVT_WDF_REQUEST_CANCEL XenUsb_EvtRequestCancelPvUrb;
-
 static NTSTATUS XenUsb_Connect(PVOID context, BOOLEAN suspend);
 static NTSTATUS XenUsb_Disconnect(PVOID context, BOOLEAN suspend);
+#if (VER_PRODUCTBUILD >= 7600)
+static KDEFERRED_ROUTINE XenUsb_HandleEventDpc;
+#endif
 
 static NTSTATUS
 XenUsb_EvtDeviceWdmIrpPreprocessQUERY_INTERFACE(WDFDEVICE device, PIRP irp)
@@ -109,7 +111,7 @@ PutRequestsOnRing(PXENUSB_DEVICE_DATA xudd) {
   FUNCTION_EXIT();
 }
 
-static BOOLEAN
+static VOID
 XenUsb_HandleEventDpc(PKDPC dpc, PVOID context, PVOID arg1, PVOID arg2) {
   NTSTATUS status;
   PXENUSB_DEVICE_DATA xudd = context;
@@ -277,7 +279,7 @@ XenUsb_HandleEventDpc(PKDPC dpc, PVOID context, PVOID arg1, PVOID arg2) {
       
   FUNCTION_EXIT();
 
-  return TRUE;
+  return;
 }
 
 static BOOLEAN
@@ -425,7 +427,7 @@ XenUsb_Connect(PVOID context, BOOLEAN suspend) {
   NTSTATUS status;
   PXENUSB_DEVICE_DATA xudd = context;
   PFN_NUMBER pfn;
-  int i;
+  ULONG i;
 
   if (!suspend) {
     xudd->handle = XnOpenDevice(xudd->pdo, XenUsb_DeviceCallback, xudd);
