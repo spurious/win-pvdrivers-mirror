@@ -83,6 +83,8 @@ struct {
   ULONG backend_state;
   UCHAR last_sense_key;
   UCHAR last_additional_sense_code;
+  UCHAR last_additional_sense_code_qualifier;
+  BOOLEAN cac;
   blkif_response_t tmp_rep;
   XENVBD_DEVICETYPE device_type;
   XENVBD_DEVICEMODE device_mode;

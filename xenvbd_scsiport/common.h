@@ -42,6 +42,8 @@ struct {
   grant_ref_t sring_gref; 
   UCHAR last_sense_key;
   UCHAR last_additional_sense_code;
+  UCHAR last_additional_sense_code_qualifier;
+  BOOLEAN cac;
   XENVBD_DEVICETYPE device_type;
   XENVBD_DEVICEMODE device_mode;
   ULONG bytes_per_sector; /* 512 for disk, 2048 for CDROM) */

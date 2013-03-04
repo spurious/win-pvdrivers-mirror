@@ -72,6 +72,12 @@ XenVbd_NotificationNextLuRequest(PXENVBD_DEVICE_DATA xvdd, UCHAR PathId, UCHAR T
 }
 
 VOID
+XenVbd_NotificationNextRequest(PXENVBD_DEVICE_DATA xvdd) {
+  ScsiPortNotification(NextLuRequest, xvdd->xvsd);
+}
+
+
+VOID
 XenVbd_NotificationBusChangeDetected(PXENVBD_DEVICE_DATA xvdd, UCHAR PathId) {
   ScsiPortNotification(BusChangeDetected, xvdd->xvsd, PathId);
 }

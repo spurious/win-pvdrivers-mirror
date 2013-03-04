@@ -143,8 +143,7 @@ decode_cdb_is_read(PSCSI_REQUEST_BLOCK srb)
 }
 
 static ULONG
-XenVbd_MakeSense(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb, UCHAR sense_key, UCHAR additional_sense_code)
-{
+XenVbd_MakeSense(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
   PSENSE_DATA sd = srb->SenseInfoBuffer;
  
   UNREFERENCED_PARAMETER(xvdd);
@@ -154,19 +153,30 @@ XenVbd_MakeSense(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb, UCHAR sense_
   
   sd->ErrorCode = 0x70;
   sd->Valid = 1;
-  sd->SenseKey = sense_key;
+  sd->SenseKey = xvdd->last_sense_key;
   sd->AdditionalSenseLength = sizeof(SENSE_DATA) - FIELD_OFFSET(SENSE_DATA, AdditionalSenseLength);
-  sd->AdditionalSenseCode = additional_sense_code;
+  sd->AdditionalSenseCode = xvdd->last_additional_sense_code;
+  sd->AdditionalSenseCodeQualifier = xvdd->last_additional_sense_code_qualifier;
+  xvdd->last_sense_key = SCSI_SENSE_NO_SENSE;
+  xvdd->last_additional_sense_code = SCSI_ADSENSE_NO_SENSE;
+  xvdd->last_additional_sense_code_qualifier = 0;
+  xvdd->cac = FALSE;
   return sizeof(SENSE_DATA);
 }
 
 static VOID
-XenVbd_MakeAutoSense(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb)
-{
-  if (srb->SrbStatus == SRB_STATUS_SUCCESS || srb->SrbFlags & SRB_FLAGS_DISABLE_AUTOSENSE)
+XenVbd_MakeAutoSense(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
+  if (xvdd->last_sense_key == SCSI_SENSE_NO_SENSE) {
     return;
-  XenVbd_MakeSense(xvdd, srb, xvdd->last_sense_key, xvdd->last_additional_sense_code);
-  srb->SrbStatus |= SRB_STATUS_AUTOSENSE_VALID;
+  }
+  srb->ScsiStatus = SCSISTAT_CHECK_CONDITION;
+  if (srb->SrbFlags & SRB_FLAGS_DISABLE_AUTOSENSE) {
+    /* because cac is set nothing will progress until sense is requested */
+    xvdd->cac = TRUE;
+    return;
+  }
+  XenVbd_MakeSense(xvdd, srb);
+  srb->SrbStatus = SRB_STATUS_ERROR | SRB_STATUS_AUTOSENSE_VALID;
 }
 
 /* called with StartIo lock held */
@@ -187,10 +197,10 @@ XenVbd_HandleEvent(PXENVBD_DEVICE_DATA xvdd) {
     return;
   }
 
-  while (more_to_do) {
+  while (more_to_do && !xvdd->cac) {
     rp = xvdd->ring.sring->rsp_prod;
     KeMemoryBarrier();
-    for (i = xvdd->ring.rsp_cons; i != rp; i++) {
+    for (i = xvdd->ring.rsp_cons; i != rp && !xvdd->cac; i++) {
       rep = XenVbd_GetResponse(xvdd, i);
       shadow = &xvdd->shadows[rep->id & SHADOW_ID_ID_MASK];
       if (shadow->reset) {
@@ -231,11 +241,9 @@ XenVbd_HandleEvent(PXENVBD_DEVICE_DATA xvdd) {
         if (srb_entry->outstanding_requests == 0 && srb_entry->offset == srb_entry->length) {
           if (srb_entry->error) {
             srb->SrbStatus = SRB_STATUS_ERROR;
-            srb->ScsiStatus = 0x02;
             xvdd->last_sense_key = SCSI_SENSE_MEDIUM_ERROR;
-            xvdd->last_additional_sense_code = SCSI_ADSENSE_NO_SENSE;
-            XenVbd_MakeAutoSense(xvdd, srb);
           }
+          XenVbd_MakeAutoSense(xvdd, srb);
           SxxxPortNotification(RequestComplete, xvdd, srb);
         }
       }
@@ -657,7 +665,7 @@ XenVbd_ResetBus(PXENVBD_DEVICE_DATA xvdd, ULONG PathId) {
   /* send a notify to Dom0 just in case it was missed for some reason (which should _never_ happen normally but could in dump mode) */
   XnNotify(xvdd->handle, xvdd->event_channel);
 
-  SxxxPortNotification(NextLuRequest, xvdd, 0, 0, 0);
+  SxxxPortNotification(NextRequest, xvdd);
   FUNCTION_EXIT();
 
   return TRUE;
@@ -681,14 +689,6 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
   PSRB_IO_CONTROL sic;
   ULONG prev_offset;
 
-  if (xvdd->device_state == DEVICE_STATE_ACTIVE) {
-    if (xvdd->new_total_sectors == -1L)
-      xvdd->new_total_sectors = xvdd->total_sectors;
-    if (xvdd->new_total_sectors != xvdd->total_sectors) {
-      xvdd->total_sectors = xvdd->new_total_sectors;
-      SxxxPortNotification(BusChangeDetected, xvdd, 0);
-    }
-  }
   while(!xvdd->aligned_buffer_in_use && xvdd->shadow_free && (srb_entry = (srb_list_entry_t *)RemoveHeadList(&xvdd->srb_list)) != (srb_list_entry_t *)&xvdd->srb_list) {
     srb = srb_entry->srb;
     prev_offset = srb_entry->offset;
@@ -699,7 +699,6 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
       SxxxPortNotification(RequestComplete, xvdd, srb);
       continue;
     }
-
     data_transfer_length = srb->DataTransferLength;
     srb_status = SRB_STATUS_PENDING;
     
@@ -710,7 +709,23 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
         InsertHeadList(&xvdd->srb_list, (PLIST_ENTRY)srb->SrbExtension);
         break;
       }
+      if (xvdd->new_total_sectors != xvdd->total_sectors) {
+        if (xvdd->new_total_sectors == -1L) {
+          xvdd->new_total_sectors = xvdd->total_sectors;
+        } else {
+          FUNCTION_MSG("Resize detected. Setting UNIT_ATTENTION\n");
+          xvdd->total_sectors = xvdd->new_total_sectors;
+          xvdd->last_sense_key = SCSI_SENSE_UNIT_ATTENTION;
+          xvdd->last_additional_sense_code = SCSI_ADSENSE_PARAMETERS_CHANGED;
+          xvdd->last_additional_sense_code_qualifier = 0x09; /* capacity changed */
+        }
+      }
       cdb = (PCDB)srb->Cdb;
+      if (xvdd->cac && cdb->CDB6GENERIC.OperationCode != SCSIOP_REQUEST_SENSE) {
+        FUNCTION_MSG("Waiting for REQUEST_SENSE\n");
+        InsertHeadList(&xvdd->srb_list, (PLIST_ENTRY)srb->SrbExtension);
+        break;
+      }
       switch(cdb->CDB6GENERIC.OperationCode) {
       case SCSIOP_TEST_UNIT_READY:
         if (dump_mode)
@@ -993,7 +1008,7 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
       case SCSIOP_REQUEST_SENSE:
         if (dump_mode)
           FUNCTION_MSG("Command = REQUEST_SENSE\n");
-        data_transfer_length = XenVbd_MakeSense(xvdd, srb, xvdd->last_sense_key, xvdd->last_additional_sense_code);
+        data_transfer_length = XenVbd_MakeSense(xvdd, srb);
         srb_status = SRB_STATUS_SUCCESS;
         break;      
       case SCSIOP_READ_TOC:
@@ -1054,6 +1069,8 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
       default:
         FUNCTION_MSG("Unhandled EXECUTE_SCSI Command = %02X\n", srb->Cdb[0]);
         xvdd->last_sense_key = SCSI_SENSE_ILLEGAL_REQUEST;
+        xvdd->last_additional_sense_code = SCSI_ADSENSE_NO_SENSE;
+        xvdd->last_additional_sense_code_qualifier = 0;
         srb_status = SRB_STATUS_ERROR;
         break;
       }
@@ -1062,9 +1079,9 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
         if (xvdd->last_sense_key == SCSI_SENSE_NO_SENSE) {
           xvdd->last_sense_key = SCSI_SENSE_ILLEGAL_REQUEST;
           xvdd->last_additional_sense_code = SCSI_ADSENSE_INVALID_CDB;
+          xvdd->last_additional_sense_code_qualifier = 0;
         }
         srb->SrbStatus = srb_status;
-        srb->ScsiStatus = 0x02;
         XenVbd_MakeAutoSense(xvdd, srb);
         SxxxPortNotification(RequestComplete, xvdd, srb);
       } else if (srb_status != SRB_STATUS_PENDING) {
@@ -1072,16 +1089,14 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
           FUNCTION_MSG("ScsiStatus = 0x%02x\n", srb->ScsiStatus);
         }
         if (data_transfer_length > srb->DataTransferLength)
-          FUNCTION_MSG("data_transfer_length too big - %d > %d\n", data_transfer_length, srb->DataTransferLength);
-        
+          FUNCTION_MSG("data_transfer_length too big - %d > %d\n", data_transfer_length, srb->DataTransferLength);        
         if (srb_status == SRB_STATUS_SUCCESS && data_transfer_length < srb->DataTransferLength) {
           srb->SrbStatus = SRB_STATUS_DATA_OVERRUN;
           srb->DataTransferLength = data_transfer_length;
         } else {
           srb->SrbStatus = srb_status;
         }
-        xvdd->last_sense_key = SCSI_SENSE_NO_SENSE;
-        xvdd->last_additional_sense_code = SCSI_ADSENSE_NO_SENSE;
+        XenVbd_MakeAutoSense(xvdd, srb);
         SxxxPortNotification(RequestComplete, xvdd, srb);
       }
       break;
