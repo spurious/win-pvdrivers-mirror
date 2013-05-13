@@ -396,17 +396,16 @@ VOID
 XenPci_HideQemuDevices() {
   #pragma warning(suppress:28138)
   WRITE_PORT_USHORT(XEN_IOPORT_DEVICE_MASK, (USHORT)qemu_hide_flags_value); //QEMU_UNPLUG_ALL_IDE_DISKS|QEMU_UNPLUG_ALL_NICS);
-  FUNCTION_MSG("Disabled qemu devices %02x\n", qemu_hide_flags_value);
+  XnDebugPrint("disabled qemu devices %02x\n", qemu_hide_flags_value);
 }
 
 static BOOLEAN
-XenPci_CheckHideQemuDevices()
-{
+XenPci_CheckHideQemuDevices() {
   #pragma warning(suppress:28138)
   if (READ_PORT_USHORT(XEN_IOPORT_MAGIC) == 0x49d2) {
     #pragma warning(suppress:28138)
     qemu_protocol_version = READ_PORT_UCHAR(XEN_IOPORT_VERSION);
-    FUNCTION_MSG("Version = %d\n", qemu_protocol_version);
+    XnDebugPrint("qemu version = %d\n", qemu_protocol_version);
     switch(qemu_protocol_version) {
     case 1:
       #pragma warning(suppress:28138)
@@ -416,14 +415,14 @@ XenPci_CheckHideQemuDevices()
       #pragma warning(suppress:28138)
       if (READ_PORT_USHORT(XEN_IOPORT_MAGIC) != 0x49d2)
       {
-        FUNCTION_MSG("Blacklisted\n");
+        XnDebugPrint("qemu we are blacklisted\n");
         break;
       }
       /* fall through */
     case 0:
       return TRUE;
     default:
-      FUNCTION_MSG("Unknown qemu version %d\n", qemu_protocol_version);
+      XnDebugPrint("unknown qemu version %d\n", qemu_protocol_version);
       break;
     }
   }

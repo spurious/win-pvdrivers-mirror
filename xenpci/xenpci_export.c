@@ -421,6 +421,7 @@ XnPrintDump() {
   bugcheck_data.BugCheckDataSize  = sizeof(bugcheck_data);
   AuxKlibGetBugCheckData(&bugcheck_data);
   if (bugcheck_data.BugCheckCode != 0) {
-    FUNCTION_MSG("Bug check 0x%08x (0x%p, 0x%p, 0x%p, 0x%p)\n", bugcheck_data.BugCheckCode, bugcheck_data.Parameter1, bugcheck_data.Parameter2, bugcheck_data.Parameter3, bugcheck_data.Parameter4);
+    /* use XnDebugPrint so this gets printed even not in debug mode */
+    XnDebugPrint("Bug check 0x%08x (0x%p, 0x%p, 0x%p, 0x%p)\n", bugcheck_data.BugCheckCode, bugcheck_data.Parameter1, bugcheck_data.Parameter2, bugcheck_data.Parameter3, bugcheck_data.Parameter4);
   }
 }
