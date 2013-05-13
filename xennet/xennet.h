@@ -45,8 +45,10 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 #define __DRIVER_NAME "XenNet"
 
-#define PACKET_NEXT_PACKET_FIELD MiniportReservedEx[sizeof(PVOID)] // RX & TX
-#define PACKET_FIRST_PB_FIELD MiniportReservedEx[0] // RX
+//#define PACKET_NEXT_PACKET_FIELD MiniportReservedEx[sizeof(PVOID)] // RX & TX
+//#define PACKET_FIRST_PB_FIELD MiniportReservedEx[0] // RX
+#define PACKET_NEXT_PACKET_FIELD MiniportReservedEx[0] // RX & TX
+#define PACKET_FIRST_PB_FIELD MiniportReservedEx[sizeof(PVOID)] // RX
 #define PACKET_LIST_ENTRY_FIELD MiniportReservedEx[sizeof(PVOID)] // TX (2 entries)
 #define PACKET_NEXT_PACKET(_packet) (*(PNDIS_PACKET *)&(_packet)->PACKET_NEXT_PACKET_FIELD)
 #define PACKET_LIST_ENTRY(_packet) (*(PLIST_ENTRY)&(_packet)->PACKET_LIST_ENTRY_FIELD)
@@ -184,7 +186,7 @@ SET_NET_ULONG(PVOID ptr, ULONG data) {
 #define MIN_LOOKAHEAD_LENGTH (MAX_IP4_HEADER_LENGTH + MAX_TCP_HEADER_LENGTH)
 #define MAX_LOOKAHEAD_LENGTH PAGE_SIZE
 
-#define LINUX_MAX_SG_ELEMENTS 19
+#define LINUX_MAX_SG_ELEMENTS 18
 
 #define PAGE_LIST_SIZE (max(NET_RX_RING_SIZE, NET_TX_RING_SIZE) * 4)
 #define MULTICAST_LIST_MAX_SIZE 32

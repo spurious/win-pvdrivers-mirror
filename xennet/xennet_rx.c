@@ -232,8 +232,6 @@ XenNet_SumPacketData(
   USHORT ip4_length;
   BOOLEAN csum_span = TRUE; /* when the USHORT to be checksummed spans a buffer */
   
-  //FUNCTION_ENTER();
-
   NdisGetFirstBufferFromPacketSafe(packet, &mdl, &buffer, &buffer_length, &total_length, NormalPagePriority);
   if (!buffer) {
     FUNCTION_MSG("NdisGetFirstBufferFromPacketSafe failed, buffer == NULL\n");
@@ -259,7 +257,7 @@ XenNet_SumPacketData(
     csum_ptr = (USHORT *)&buffer[XN_HDR_SIZE + pi->ip4_header_length + 6];
     break;
   default:
-    KdPrint((__DRIVER_NAME "     Don't know how to calc sum for IP Proto %d\n", pi->ip_proto));
+    FUNCTION_MSG("Don't know how to calc sum for IP Proto %d\n", pi->ip_proto);
     //FUNCTION_EXIT();
     return FALSE; // should never happen
   }
@@ -489,10 +487,12 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
       }
       out_remaining -= out_length;
     }
+    #if NTDDI_VERSION < NTDDI_VISTA
     if (pi->split_required) {
       // TODO: only if Ip checksum is disabled...
-      //XenNet_SumIpHeader(header_va, pi->ip4_header_length);
+      XenNet_SumIpHeader(header_va, pi->ip4_header_length);
     }
+    #endif
     if (header_extra > 0)
       pi->header_length -= header_extra;
   }
@@ -508,7 +508,7 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
     csum_info = (PNDIS_TCP_IP_CHECKSUM_PACKET_INFO)&NDIS_PER_PACKET_INFO_FROM_PACKET(
       packet, TcpIpChecksumPacketInfo);
     XN_ASSERT(csum_info->Value == 0);
-    if (pi->csum_blank || pi->data_validated) {
+    if (pi->csum_blank || pi->data_validated || pi->split_required) {
       BOOLEAN checksum_offload = FALSE;
       /* we know this is IPv4, and we know Linux always validates the IPv4 checksum for us */
       if (xi->setting_csum.V4Receive.IpChecksum) {
@@ -606,7 +606,7 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
   #if NTDDI_VERSION < NTDDI_VISTA
   /* windows gets lazy about ack packets and holds on to them forever under high load situations. we don't like this */
   NdisQueryPacketLength(packet, &packet_length);
-  if (pi->ip_proto == 6 && packet_length <= NDIS_STATUS_RESOURCES_MAX_LENGTH)
+  if (pi->parse_result != PARSE_OK || (pi->ip_proto == 6 && packet_length <= NDIS_STATUS_RESOURCES_MAX_LENGTH))
     NDIS_SET_PACKET_STATUS(packet, NDIS_STATUS_RESOURCES);
   else
     NDIS_SET_PACKET_STATUS(packet, NDIS_STATUS_SUCCESS);
@@ -695,9 +695,6 @@ XenNet_MakePackets(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi)
       else
         pi->header[XN_HDR_SIZE + pi->ip4_header_length + 13] |= 8;
     }
-    //XenNet_SumPacketData(pi, packet, TRUE);
-    //entry = (PLIST_ENTRY)&packet->MiniportReservedEx[sizeof(PVOID)];
-    //InsertTailList(rx_packet_list, entry);
   }
 done:
   page_buf = pi->first_pb;

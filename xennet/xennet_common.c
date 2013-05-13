@@ -43,7 +43,6 @@ XenNet_BuildHeader(packet_info_t *pi, PUCHAR header, ULONG new_header_size)
   if (header == pi->first_mdl_virtual) {
     /* still working in the first buffer */
     if (new_header_size <= pi->first_mdl_length) {
-      //KdPrint((__DRIVER_NAME "     new_header_size <= pi->first_mdl_length\n"));
       pi->header_length = new_header_size;
       if (pi->header_length == pi->first_mdl_length) {
         #if NTDDI_VERSION < NTDDI_VISTA
@@ -60,7 +59,6 @@ XenNet_BuildHeader(packet_info_t *pi, PUCHAR header, ULONG new_header_size)
       //FUNCTION_EXIT();
       return TRUE;
     } else {
-      //KdPrint((__DRIVER_NAME "     Switching to header_data\n"));
       memcpy(pi->header_data, header, pi->header_length);
       header = pi->header = pi->header_data;
     }
@@ -69,12 +67,10 @@ XenNet_BuildHeader(packet_info_t *pi, PUCHAR header, ULONG new_header_size)
   bytes_remaining = new_header_size - pi->header_length;
   // TODO: if there are only a small number of bytes left in the current buffer then increase to consume that too... it would have to be no more than the size of header+mss though
 
-  //KdPrint((__DRIVER_NAME "     A bytes_remaining = %d, pi->curr_mdl = %p\n", bytes_remaining, pi->curr_mdl));
   while (bytes_remaining && pi->curr_mdl) {
     ULONG copy_size;
     
     XN_ASSERT(pi->curr_mdl);
-    //KdPrint((__DRIVER_NAME "     B bytes_remaining = %d, pi->curr_mdl = %p\n", bytes_remaining, pi->curr_mdl));
     if (MmGetMdlByteCount(pi->curr_mdl)) {
       PUCHAR src_addr;
       src_addr = MmGetSystemAddressForMdlSafe(pi->curr_mdl, NormalPagePriority);
@@ -83,7 +79,6 @@ XenNet_BuildHeader(packet_info_t *pi, PUCHAR header, ULONG new_header_size)
         return FALSE;
       }
       copy_size = min(bytes_remaining, MmGetMdlByteCount(pi->curr_mdl) - pi->curr_mdl_offset);
-      //KdPrint((__DRIVER_NAME "     B copy_size = %d\n", copy_size));
       memcpy(header + pi->header_length,
         src_addr + pi->curr_mdl_offset, copy_size);
       pi->curr_mdl_offset = (USHORT)(pi->curr_mdl_offset + copy_size);
