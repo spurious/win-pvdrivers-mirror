@@ -63,10 +63,8 @@ put_shadow_on_freelist(PXENVBD_DEVICE_DATA xvdd, blkif_shadow_t *shadow)
 }
 
 static __inline ULONG
-decode_cdb_length(PSCSI_REQUEST_BLOCK srb)
-{
-  switch (srb->Cdb[0])
-  {
+decode_cdb_length(PSCSI_REQUEST_BLOCK srb) {
+  switch (srb->Cdb[0]) {
   case SCSIOP_READ:
   case SCSIOP_WRITE:
     return ((ULONG)(UCHAR)srb->Cdb[7] << 8) | (ULONG)(UCHAR)srb->Cdb[8];
@@ -74,6 +72,7 @@ decode_cdb_length(PSCSI_REQUEST_BLOCK srb)
   case SCSIOP_WRITE16:
     return ((ULONG)(UCHAR)srb->Cdb[10] << 24) | ((ULONG)(UCHAR)srb->Cdb[11] << 16) | ((ULONG)(UCHAR)srb->Cdb[12] << 8) | (ULONG)(UCHAR)srb->Cdb[13];    
   default:
+    FUNCTION_MSG("Unknown SCSIOP function %02x\n", srb->Cdb[0]);
     return 0;
   }
 }
@@ -105,8 +104,7 @@ decode_cdb_sector(PSCSI_REQUEST_BLOCK srb)
 {
   ULONGLONG sector;
   
-  switch (srb->Cdb[0])
-  {
+  switch (srb->Cdb[0]) {
   case SCSIOP_READ:
   case SCSIOP_WRITE:
     sector = ((ULONG)(UCHAR)srb->Cdb[2] << 24) | ((ULONG)(UCHAR)srb->Cdb[3] << 16) | ((ULONG)(UCHAR)srb->Cdb[4] << 8) | (ULONG)(UCHAR)srb->Cdb[5];
@@ -120,6 +118,7 @@ decode_cdb_sector(PSCSI_REQUEST_BLOCK srb)
     //FUNCTION_MSG("sector_number = %d (high) %d (low)\n", (ULONG)(sector >> 32), (ULONG)sector);
     break;
   default:
+    FUNCTION_MSG("Unknown SCSIOP function %02x\n", srb->Cdb[0]);
     sector = 0;
     break;
   }
@@ -138,6 +137,7 @@ decode_cdb_is_read(PSCSI_REQUEST_BLOCK srb)
   case SCSIOP_WRITE16:
     return FALSE;
   default:
+    FUNCTION_MSG("Unknown SCSIOP function %02x\n", srb->Cdb[0]);
     return FALSE;
   }
 }
@@ -452,8 +452,8 @@ XenVbd_PutSrbOnRing(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
   return TRUE;
 }
 
-static ULONG
-XenVbd_FillModePage(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
+static UCHAR
+XenVbd_FillModePage(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb, PULONG data_transfer_length) {
   PMODE_PARAMETER_HEADER parameter_header = NULL;
   PMODE_PARAMETER_HEADER10 parameter_header10 = NULL;
   PMODE_PARAMETER_BLOCK param_block;
@@ -585,19 +585,15 @@ XenVbd_FillModePage(PXENVBD_DEVICE_DATA xvdd, PSCSI_REQUEST_BLOCK srb) {
   }
 
   if (!valid_page && cdb_page_code != MODE_SENSE_RETURN_ALL) {
-    srb->SrbStatus = SRB_STATUS_ERROR;
+    srb->ScsiStatus = 0; // TODO: make this something meaningful
+    *data_transfer_length = 0;
+    return SRB_STATUS_ERROR;
   }
-  else if(offset < srb->DataTransferLength)
-    srb->SrbStatus = SRB_STATUS_DATA_OVERRUN;
-  else
-    srb->SrbStatus = SRB_STATUS_SUCCESS;
-  srb->DataTransferLength = min(srb->DataTransferLength, offset);
   srb->ScsiStatus = 0;
-  memcpy(srb->DataBuffer, buffer, srb->DataTransferLength);
-  
-  //FUNCTION_EXIT();
+  memcpy(srb->DataBuffer, buffer, min(srb->DataTransferLength, offset));
+  *data_transfer_length = offset;
 
-  return TRUE;
+  return SRB_STATUS_SUCCESS;
 }
 
 static BOOLEAN
@@ -742,8 +738,8 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
         data_buffer = srb->DataBuffer;
         RtlZeroMemory(data_buffer, srb->DataTransferLength);
         srb_status = SRB_STATUS_SUCCESS;
-        switch (xvdd->device_type)
-        {
+        srb->ScsiStatus = 0;
+        switch (xvdd->device_type) {
         case XENVBD_DEVICETYPE_DISK:
           if ((srb->Cdb[1] & 1) == 0) {
             if (srb->Cdb[2]) {
@@ -765,7 +761,7 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
           } else {
             switch (srb->Cdb[2]) {
             case VPD_SUPPORTED_PAGES: /* list of pages we support */
-              FUNCTION_MSG("VPD_SUPPORTED_PAGES\n");
+              FUNCTION_MSG("VPD_SUPPORTED_PAGES - length = %d\n", srb->DataTransferLength);
               data_buffer[0] = DIRECT_ACCESS_DEVICE;
               data_buffer[1] = VPD_SUPPORTED_PAGES;
               data_buffer[2] = 0x00;
@@ -884,7 +880,6 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
         //FUNCTION_MSG("  LUN = %d, RelAdr = %d\n", srb->Cdb[1] >> 4, srb->Cdb[1] & 1);
         //FUNCTION_MSG("  LBA = %02x%02x%02x%02x\n", srb->Cdb[2], srb->Cdb[3], srb->Cdb[4], srb->Cdb[5]);
         //FUNCTION_MSG("  PMI = %d\n", srb->Cdb[8] & 1);
-        //data_buffer = LongLongToPtr(ScsiPortGetPhysicalAddress(xvdd, srb, srb->DataBuffer, &data_buffer_length).QuadPart);
         data_buffer = srb->DataBuffer;
         RtlZeroMemory(data_buffer, srb->DataTransferLength);
         if ((xvdd->total_sectors - 1) >> 32) {
@@ -955,14 +950,12 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
       case SCSIOP_MODE_SENSE10:
         if (dump_mode)
           FUNCTION_MSG("Command = MODE_SENSE (DBD = %d, PC = %d, Page Code = %02x)\n", srb->Cdb[1] & 0x08, srb->Cdb[2] & 0xC0, srb->Cdb[2] & 0x3F);
-        data_transfer_length = XenVbd_FillModePage(xvdd, srb);
-        srb_status = SRB_STATUS_SUCCESS;
+        srb_status = XenVbd_FillModePage(xvdd, srb, &data_transfer_length);
         break;
       case SCSIOP_READ:
       case SCSIOP_READ16:
       case SCSIOP_WRITE:
       case SCSIOP_WRITE16:
-        //FUNCTION_MSG("srb = %p\n", srb);
         if (XenVbd_PutSrbOnRing(xvdd, srb)) {
           notify = TRUE;
         }
@@ -1090,7 +1083,10 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
         }
         if (data_transfer_length > srb->DataTransferLength)
           FUNCTION_MSG("data_transfer_length too big - %d > %d\n", data_transfer_length, srb->DataTransferLength);        
+          srb->SrbStatus = SRB_STATUS_DATA_OVERRUN;
+          srb->DataTransferLength = data_transfer_length;
         if (srb_status == SRB_STATUS_SUCCESS && data_transfer_length < srb->DataTransferLength) {
+          FUNCTION_MSG("data_transfer_length too small - %d < %d\n", data_transfer_length, srb->DataTransferLength);        
           srb->SrbStatus = SRB_STATUS_DATA_OVERRUN;
           srb->DataTransferLength = data_transfer_length;
         } else {
