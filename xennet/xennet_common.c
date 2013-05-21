@@ -354,6 +354,7 @@ XenNet_Connect(PVOID context, BOOLEAN suspend) {
   ULONG octet;
   PCHAR tmp_string;
   ULONG tmp_ulong;
+  LARGE_INTEGER timeout;
 
   if (!suspend) {
     xi->handle = XnOpenDevice(xi->pdo, XenNet_DeviceCallback, xi);
@@ -376,7 +377,8 @@ XenNet_Connect(PVOID context, BOOLEAN suspend) {
       if (xi->backend_state == XenbusStateClosed) {
         status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "state", XenbusStateInitialising);
       }
-      KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, NULL);
+      timeout.QuadPart = -10 * 1000 * 1000; /* 1 second */
+      KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, &timeout);
     }
     if (xi->backend_state != XenbusStateInitialising && xi->backend_state != XenbusStateInitWait && xi->backend_state != XenbusStateInitialised) {
       FUNCTION_MSG("Backend state timeout\n");
@@ -480,7 +482,8 @@ XenNet_Connect(PVOID context, BOOLEAN suspend) {
 
     for (i = 0; i <= 5 && xi->backend_state != XenbusStateConnected; i++) {
       FUNCTION_MSG("Waiting for XenbusStateConnected\n");
-      KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, NULL);
+      timeout.QuadPart = -10 * 1000 * 1000; /* 1 second */
+      KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, &timeout);
     }
     if (xi->backend_state != XenbusStateConnected) {
       FUNCTION_MSG("Backend state timeout\n");
@@ -499,6 +502,7 @@ NTSTATUS
 XenNet_Disconnect(PVOID context, BOOLEAN suspend) {
   struct xennet_info *xi = (struct xennet_info *)context;
   //PFN_NUMBER pfn;
+  LARGE_INTEGER timeout;
   NTSTATUS status;
 
   if (xi->device_state != DEVICE_STATE_ACTIVE && xi->device_state != DEVICE_STATE_INACTIVE) {
@@ -511,12 +515,14 @@ XenNet_Disconnect(PVOID context, BOOLEAN suspend) {
     status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "state", XenbusStateClosing);
     while (xi->backend_state != XenbusStateClosing && xi->backend_state != XenbusStateClosed) {
       FUNCTION_MSG("Waiting for XenbusStateClosing/Closed\n");
-      KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, NULL);
+      timeout.QuadPart = -10 * 1000 * 1000; /* 1 second */
+      KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, &timeout);
     }
     status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "state", XenbusStateClosed);
     while (xi->backend_state != XenbusStateClosed) {
       FUNCTION_MSG("Waiting for XenbusStateClosed\n");
-      KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, NULL);
+      timeout.QuadPart = -10 * 1000 * 1000; /* 1 second */
+      KeWaitForSingleObject(&xi->backend_event, Executive, KernelMode, FALSE, &timeout);
     }
     XnUnbindEvent(xi->handle, xi->event_channel);
     
@@ -541,6 +547,7 @@ VOID
 XenNet_DeviceCallback(PVOID context, ULONG callback_type, PVOID value) {
   struct xennet_info *xi = (struct xennet_info *)context;
   ULONG state;
+  NTSTATUS status;
   
   FUNCTION_ENTER();
   switch (callback_type) {
@@ -561,7 +568,8 @@ XenNet_DeviceCallback(PVOID context, ULONG callback_type, PVOID value) {
   case XN_DEVICE_CALLBACK_RESUME:
     FUNCTION_MSG("XN_DEVICE_CALLBACK_RESUME");
     xi->device_state = DEVICE_STATE_INITIALISING;
-    XenNet_Connect(xi, TRUE);
+    status = XenNet_Connect(xi, TRUE);
+    // TODO: what to do here if not success?
     if (xi->device_state != DEVICE_STATE_INACTIVE) {
       xi->device_state = DEVICE_STATE_ACTIVE;
     }

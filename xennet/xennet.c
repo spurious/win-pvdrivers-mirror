@@ -268,7 +268,10 @@ XenNet_Initialize(NDIS_HANDLE adapter_handle, NDIS_HANDLE driver_context, PNDIS_
 
   NdisCloseConfiguration(config_handle);
 
-  XenNet_Connect(xi, FALSE);
+  status = XenNet_Connect(xi, FALSE);
+  if (!NT_SUCCESS(status)) {
+    goto err;
+  }
 
   if (!xi->backend_sg_supported)
     xi->backend_gso_value = min(xi->backend_gso_value, PAGE_SIZE - MAX_PKT_HEADER_LENGTH);
