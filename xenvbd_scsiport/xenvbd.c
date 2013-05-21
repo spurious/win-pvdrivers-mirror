@@ -154,8 +154,6 @@ XenVbd_HwScsiFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInform
   FUNCTION_MSG("MultipleRequestPerLu = %d\n", ConfigInfo->MultipleRequestPerLu);
   FUNCTION_MSG("TaggedQueuing = %d\n", ConfigInfo->TaggedQueuing);
   FUNCTION_MSG("AutoRequestSense  = %d\n", ConfigInfo->AutoRequestSense);
-  ConfigInfo->ScatterGather = FALSE; //TRUE;
-  ConfigInfo->Master = FALSE; //TRUE;
   ConfigInfo->CachesData = FALSE;
   ConfigInfo->MapBuffers = TRUE;
   ConfigInfo->AlignmentMask = 0;
@@ -163,14 +161,18 @@ XenVbd_HwScsiFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInform
   ConfigInfo->InitiatorBusId[0] = 1;
   ConfigInfo->MaximumNumberOfLogicalUnits = 1;
   ConfigInfo->MaximumNumberOfTargets = 2;
-  #if 0
+  FUNCTION_MSG("MapBuffers = %d\n", ConfigInfo->MapBuffers);
+  FUNCTION_MSG("NeedPhysicalAddresses = %d\n", ConfigInfo->NeedPhysicalAddresses);
   if (ConfigInfo->Dma64BitAddresses == SCSI_DMA64_SYSTEM_SUPPORTED) {
-    ConfigInfo->Dma64BitAddresses = SCSI_DMA64_MINIPORT_SUPPORTED;
     FUNCTION_MSG("Dma64BitAddresses supported\n");
+    ConfigInfo->Dma64BitAddresses = SCSI_DMA64_MINIPORT_SUPPORTED;
+    ConfigInfo->ScatterGather = TRUE;
+    ConfigInfo->Master = TRUE;
   } else {
     FUNCTION_MSG("Dma64BitAddresses not supported\n");
+    ConfigInfo->ScatterGather = FALSE;
+    ConfigInfo->Master = FALSE;
   }
-  #endif
   *Again = FALSE;
 
   FUNCTION_EXIT();
