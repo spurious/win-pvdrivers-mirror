@@ -20,6 +20,17 @@
 ; })
 
 .code
+_hypercall1 proc
+    push rdi
+    push rsi
+    mov rdi, rdx
+    mov rax, rcx
+    call rax
+    pop rsi
+    pop rdi
+    ret
+_hypercall1 endp
+
 _hypercall2 proc
     push rdi
     push rsi

@@ -20,8 +20,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
 static __inline int
-_HYPERVISOR_memory_op(PVOID hypercall_stubs, int cmd, void *arg)
-{
+HYPERVISOR_memory_op(int cmd, void *arg) {
   long __res;
   __asm {
     mov ebx, cmd
@@ -35,8 +34,7 @@ _HYPERVISOR_memory_op(PVOID hypercall_stubs, int cmd, void *arg)
 }
 
 static __inline int
-_HYPERVISOR_sched_op(PVOID hypercall_stubs, int cmd, void *arg)
-{
+HYPERVISOR_sched_op(int cmd, void *arg) {
   long __res;
   __asm {
     mov ebx, cmd
@@ -50,8 +48,7 @@ _HYPERVISOR_sched_op(PVOID hypercall_stubs, int cmd, void *arg)
 }
 
 static __inline int
-_HYPERVISOR_xen_version(PVOID hypercall_stubs, int cmd, void *arg)
-{
+HYPERVISOR_xen_version(int cmd, void *arg) {
   long __res;
   __asm {
     mov ebx, cmd
@@ -65,8 +62,7 @@ _HYPERVISOR_xen_version(PVOID hypercall_stubs, int cmd, void *arg)
 }
 
 static __inline int
-_HYPERVISOR_grant_table_op(PVOID hypercall_stubs, int cmd, void *uop, unsigned int count)
-{
+HYPERVISOR_grant_table_op(int cmd, void *uop, unsigned int count) {
   long __res;
   __asm {
     mov ebx, cmd
@@ -81,8 +77,7 @@ _HYPERVISOR_grant_table_op(PVOID hypercall_stubs, int cmd, void *uop, unsigned i
 }
 
 static __inline int
-_HYPERVISOR_hvm_op(PVOID hypercall_stubs, int op, struct xen_hvm_param *arg)
-{
+HYPERVISOR_hvm_op(int op, struct xen_hvm_param *arg) {
   long __res;
   __asm {
     mov ebx, op
@@ -96,14 +91,26 @@ _HYPERVISOR_hvm_op(PVOID hypercall_stubs, int op, struct xen_hvm_param *arg)
 }
 
 static __inline int
-_HYPERVISOR_event_channel_op(PVOID hypercall_stubs, int cmd, void *op)
-{
+HYPERVISOR_event_channel_op(int cmd, void *op) {
   long __res;
   __asm {
     mov ebx, cmd
     mov ecx, op
     mov eax, hypercall_stubs
     add eax, (__HYPERVISOR_event_channel_op * 32)
+    call eax
+    mov [__res], eax
+  }
+  return __res;
+}
+
+static __inline int
+HYPERVISOR_tmem_op(struct tmem_op *op) {
+  long __res;
+  __asm {
+    mov ebx, op
+    mov eax, hypercall_stubs
+    add eax, (__HYPERVISOR_tmem_op * 32)
     call eax
     mov [__res], eax
   }

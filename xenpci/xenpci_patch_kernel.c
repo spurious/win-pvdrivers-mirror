@@ -329,7 +329,7 @@ MapVlapic(PXENPCI_DEVICE_DATA xpdd)
     xatp.space = XENMAPSPACE_vlapic;
     xatp.gpfn = (xen_pfn_t)(lapic_page[i].QuadPart >> PAGE_SHIFT);
     KdPrint((__DRIVER_NAME "     gpfn = %x\n", xatp.gpfn));
-    rc = HYPERVISOR_memory_op(xpdd, XENMEM_add_to_physmap, &xatp);
+    rc = HYPERVISOR_memory_op(XENMEM_add_to_physmap, &xatp);
     KdPrint((__DRIVER_NAME "     hypervisor memory op (XENMAPSPACE_vlapic_regs) ret = %d\n", rc));
     if (rc != 0)
     {

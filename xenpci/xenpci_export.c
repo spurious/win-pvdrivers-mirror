@@ -425,3 +425,8 @@ XnPrintDump() {
     XnDebugPrint("Bug check 0x%08x (0x%p, 0x%p, 0x%p, 0x%p)\n", bugcheck_data.BugCheckCode, bugcheck_data.Parameter1, bugcheck_data.Parameter2, bugcheck_data.Parameter3, bugcheck_data.Parameter4);
   }
 }
+
+ULONG
+XnTmemOp(struct tmem_op *tmem_op) {
+  return HYPERVISOR_tmem_op(tmem_op);
+}

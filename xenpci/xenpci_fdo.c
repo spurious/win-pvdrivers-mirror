@@ -33,6 +33,69 @@ static EVT_WDF_WORKITEM XenPci_SuspendResume;
 static KSTART_ROUTINE XenPci_BalloonThreadProc;
 #endif
 
+#define XEN_SIGNATURE_LOWER 0x40000000
+#define XEN_SIGNATURE_UPPER 0x4000FFFF
+
+USHORT xen_version_major = (USHORT)-1;
+USHORT xen_version_minor = (USHORT)-1;
+PVOID hypercall_stubs = NULL;
+
+static VOID
+hvm_get_hypercall_stubs() {
+  ULONG base;
+  DWORD32 cpuid_output[4];
+  char xensig[13];
+  ULONG i;
+  ULONG pages;
+  ULONG msr;
+
+  if (hypercall_stubs) {
+    FUNCTION_MSG("hypercall_stubs alread set\n");
+    return;
+  }
+
+  for (base = XEN_SIGNATURE_LOWER; base < XEN_SIGNATURE_UPPER; base += 0x100) {
+    __cpuid(cpuid_output, base);
+    *(ULONG*)(xensig + 0) = cpuid_output[1];
+    *(ULONG*)(xensig + 4) = cpuid_output[2];
+    *(ULONG*)(xensig + 8) = cpuid_output[3];
+    xensig[12] = '\0';
+    FUNCTION_MSG("base = 0x%08x, Xen Signature = %s, EAX = 0x%08x\n", base, xensig, cpuid_output[0]);
+    if (!strncmp("XenVMMXenVMM", xensig, 12) && ((cpuid_output[0] - base) >= 2))
+      break;
+  }
+  if (base == XEN_SIGNATURE_UPPER) {
+    FUNCTION_MSG("Cannot find Xen signature\n");
+    return;
+  }
+
+  __cpuid(cpuid_output, base + 1);
+  xen_version_major = (USHORT)(cpuid_output[0] >> 16);
+  xen_version_minor = (USHORT)(cpuid_output[0] & 0xFFFF);
+  FUNCTION_MSG("Xen Version %d.%d\n", xen_version_major, xen_version_minor);
+
+  __cpuid(cpuid_output, base + 2);
+  pages = cpuid_output[0];
+  msr = cpuid_output[1];
+
+  hypercall_stubs = ExAllocatePoolWithTag(NonPagedPool, pages * PAGE_SIZE, XENPCI_POOL_TAG);
+  FUNCTION_MSG("Hypercall area at %p\n", hypercall_stubs);
+
+  if (!hypercall_stubs)
+    return;
+  for (i = 0; i < pages; i++) {
+    ULONGLONG pfn;
+    pfn = (MmGetPhysicalAddress((PUCHAR)hypercall_stubs + i * PAGE_SIZE).QuadPart >> PAGE_SHIFT);
+    __writemsr(msr, (pfn << PAGE_SHIFT) + i);
+  }
+}
+
+static VOID
+hvm_free_hypercall_stubs() {
+  ExFreePoolWithTag(hypercall_stubs, XENPCI_POOL_TAG);
+  hypercall_stubs = NULL;
+}
+
 static VOID
 XenPci_MapHalThenPatchKernel(PXENPCI_DEVICE_DATA xpdd)
 {
@@ -111,12 +174,12 @@ XenPci_Init(PXENPCI_DEVICE_DATA xpdd)
 
   FUNCTION_ENTER();
 
-  if (!xpdd->hypercall_stubs)
+  if (!hypercall_stubs)
   {
     XN_ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
-    xpdd->hypercall_stubs = hvm_get_hypercall_stubs();
+    hvm_get_hypercall_stubs();
   }
-  if (!xpdd->hypercall_stubs)
+  if (!hypercall_stubs)
     return STATUS_UNSUCCESSFUL;
 
   if (!xpdd->shared_info_area)
@@ -133,7 +196,7 @@ XenPci_Init(PXENPCI_DEVICE_DATA xpdd)
   xatp.space = XENMAPSPACE_shared_info;
   xatp.gpfn = (xen_pfn_t)(xpdd->shared_info_area_unmapped.QuadPart >> PAGE_SHIFT);
   FUNCTION_MSG("gpfn = %x\n", xatp.gpfn);
-  ret = HYPERVISOR_memory_op(xpdd, XENMEM_add_to_physmap, &xatp);
+  ret = HYPERVISOR_memory_op(XENMEM_add_to_physmap, &xatp);
   FUNCTION_MSG("hypervisor memory op (XENMAPSPACE_shared_info) ret = %d\n", ret);
 
   FUNCTION_EXIT();
@@ -270,13 +333,13 @@ XenPci_BalloonThreadProc(PVOID StartContext)
         set_xen_guest_handle(reservation.extent_start, pfns);
         
         //FUNCTION_MSG("Calling HYPERVISOR_memory_op(XENMEM_populate_physmap) - pfn_count = %d\n", pfn_count);
-        ret = HYPERVISOR_memory_op(xpdd, XENMEM_populate_physmap, &reservation);
+        ret = HYPERVISOR_memory_op(XENMEM_populate_physmap, &reservation);
         //FUNCTION_MSG("populated %d pages\n", ret);
         if (ret < (ULONG)pfn_count) {
           if (ret > 0) {
             /* We hit the Xen hard limit: reprobe. */
             reservation.nr_extents = ret;
-            ret = HYPERVISOR_memory_op(xpdd, XENMEM_decrease_reservation, &reservation);
+            ret = HYPERVISOR_memory_op(XENMEM_decrease_reservation, &reservation);
             FUNCTION_MSG("decreased %d pages (xen is out of pages)\n", ret);
           }
           ExFreePoolWithTag(pfns, XENPCI_POOL_TAG);
@@ -335,7 +398,7 @@ XenPci_BalloonThreadProc(PVOID StartContext)
           #pragma warning(disable: 4127) /* conditional expression is constant */
           set_xen_guest_handle(reservation.extent_start, pfns);
           
-          ret = HYPERVISOR_memory_op(xpdd, XENMEM_decrease_reservation, &reservation);
+          ret = HYPERVISOR_memory_op(XENMEM_decrease_reservation, &reservation);
           ExFreePoolWithTag(pfns, XENPCI_POOL_TAG);
           if (head) {
             mdl->Next = head;
@@ -396,7 +459,7 @@ XenPci_Suspend0(PVOID context)
   sysenter_esp = __readmsr(0x175);
   sysenter_eip = __readmsr(0x176);
   
-  cancelled = hvm_shutdown(xpdd, SHUTDOWN_suspend);
+  cancelled = hvm_shutdown(SHUTDOWN_suspend);
 
   /* this code was to fix a bug that existed in Xen for a short time... it is harmless but can probably be removed */
   if (__readmsr(0x174) != sysenter_cs) {

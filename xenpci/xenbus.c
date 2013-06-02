@@ -354,8 +354,8 @@ XenBus_Connect(PXENPCI_DEVICE_DATA xpdd)
   PHYSICAL_ADDRESS pa_xen_store_interface;
   xen_ulong_t xen_store_mfn;
 
-  xpdd->xenbus_event = (evtchn_port_t)hvm_get_parameter(xpdd, HVM_PARAM_STORE_EVTCHN);
-  xen_store_mfn = (xen_ulong_t)hvm_get_parameter(xpdd, HVM_PARAM_STORE_PFN);
+  xpdd->xenbus_event = (evtchn_port_t)hvm_get_parameter(HVM_PARAM_STORE_EVTCHN);
+  xen_store_mfn = (xen_ulong_t)hvm_get_parameter(HVM_PARAM_STORE_PFN);
   pa_xen_store_interface.QuadPart = (ULONGLONG)xen_store_mfn << PAGE_SHIFT;
   xpdd->xen_store_interface = MmMapIoSpace(pa_xen_store_interface, PAGE_SIZE, MmNonCached);
 

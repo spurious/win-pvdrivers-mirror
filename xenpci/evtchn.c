@@ -353,44 +353,46 @@ EvtChn_Unmask(PVOID context, evtchn_port_t port) {
 }
 
 NTSTATUS
-EvtChn_Notify(PVOID Context, evtchn_port_t port) {
-  PXENPCI_DEVICE_DATA xpdd = Context;
+EvtChn_Notify(PVOID context, evtchn_port_t port) {
   struct evtchn_send send;
 
+  UNREFERENCED_PARAMETER(context);
   send.port = port;
-  (void)HYPERVISOR_event_channel_op(xpdd, EVTCHNOP_send, &send);
+  (void)HYPERVISOR_event_channel_op(EVTCHNOP_send, &send);
   return STATUS_SUCCESS;
 }
 
 evtchn_port_t
 EvtChn_AllocIpi(PVOID context, ULONG vcpu) {
-  PXENPCI_DEVICE_DATA xpdd = context;
   evtchn_bind_ipi_t op;
   
+  UNREFERENCED_PARAMETER(context);
   FUNCTION_ENTER();
   op.vcpu = vcpu;
   op.port = 0;
-  HYPERVISOR_event_channel_op(xpdd, EVTCHNOP_bind_ipi, &op);
+  HYPERVISOR_event_channel_op(EVTCHNOP_bind_ipi, &op);
   FUNCTION_EXIT();
   return op.port;
 }
 
 evtchn_port_t
-EvtChn_AllocUnbound(PVOID Context, domid_t Domain) {
-  PXENPCI_DEVICE_DATA xpdd = Context;
+EvtChn_AllocUnbound(PVOID context, domid_t Domain) {
   evtchn_alloc_unbound_t op;
+
+  UNREFERENCED_PARAMETER(context);
   op.dom = DOMID_SELF;
   op.remote_dom = Domain;
-  HYPERVISOR_event_channel_op(xpdd, EVTCHNOP_alloc_unbound, &op);
+  HYPERVISOR_event_channel_op(EVTCHNOP_alloc_unbound, &op);
   return op.port;
 }
 
 VOID
-EvtChn_Close(PVOID Context, evtchn_port_t port) {
-  PXENPCI_DEVICE_DATA xpdd = Context;
+EvtChn_Close(PVOID context, evtchn_port_t port) {
   evtchn_close_t op;
+
+  UNREFERENCED_PARAMETER(context);
   op.port = port;
-  HYPERVISOR_event_channel_op(xpdd, EVTCHNOP_close, &op);
+  HYPERVISOR_event_channel_op(EVTCHNOP_close, &op);
   return;
 }
 
@@ -437,7 +439,7 @@ EvtChn_Init(PXENPCI_DEVICE_DATA xpdd)
 
   KeMemoryBarrier();
 
-  result = hvm_set_parameter(xpdd, HVM_PARAM_CALLBACK_IRQ, xpdd->irq_number);
+  result = hvm_set_parameter(HVM_PARAM_CALLBACK_IRQ, xpdd->irq_number);
   FUNCTION_MSG("hvm_set_parameter(HVM_PARAM_CALLBACK_IRQ, %d) = %d\n", xpdd->irq_number, (ULONG)result);
 
   for (i = 0; i < MAX_VIRT_CPUS; i++)
@@ -467,7 +469,7 @@ EvtChn_Suspend(PXENPCI_DEVICE_DATA xpdd)
   for (i = 0; i < MAX_VIRT_CPUS; i++)
     xpdd->shared_info_area->vcpu_info[i].evtchn_upcall_mask = 1;
   KeMemoryBarrier();
-  hvm_set_parameter(xpdd, HVM_PARAM_CALLBACK_IRQ, 0);
+  hvm_set_parameter(HVM_PARAM_CALLBACK_IRQ, 0);
 
   for (i = 0; i < NR_EVENTS; i++) {
     if (xpdd->ev_actions[i].type == EVT_ACTION_TYPE_DPC) {

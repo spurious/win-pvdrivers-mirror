@@ -76,7 +76,7 @@ GntTbl_Map(PVOID Context, unsigned int start_idx, unsigned int end_idx)
     xatp.idx = i;
     xatp.space = XENMAPSPACE_grant_table;
     xatp.gpfn = (xen_pfn_t)MmGetMdlPfnArray(xpdd->gnttbl_mdl)[i];
-    if (HYPERVISOR_memory_op(xpdd, XENMEM_add_to_physmap, &xatp))
+    if (HYPERVISOR_memory_op(XENMEM_add_to_physmap, &xatp))
     {
       FUNCTION_MSG("*** ERROR MAPPING FRAME %d ***\n", i);
     }
@@ -154,14 +154,14 @@ GntTbl_EndAccess(
 }
 
 static unsigned int 
-GntTbl_QueryMaxFrames(PXENPCI_DEVICE_DATA xpdd)
-{
+GntTbl_QueryMaxFrames(PXENPCI_DEVICE_DATA xpdd) {
   struct gnttab_query_size query;
   int rc;
 
+  UNREFERENCED_PARAMETER(xpdd);
   query.dom = DOMID_SELF;
 
-  rc = HYPERVISOR_grant_table_op(xpdd, GNTTABOP_query_size, &query, 1);
+  rc = HYPERVISOR_grant_table_op(GNTTABOP_query_size, &query, 1);
   if ((rc < 0) || (query.status != GNTST_okay))
   {
     FUNCTION_MSG("***CANNOT QUERY MAX GRANT FRAME***\n");
@@ -171,8 +171,7 @@ GntTbl_QueryMaxFrames(PXENPCI_DEVICE_DATA xpdd)
 }
 
 VOID
-GntTbl_Init(PXENPCI_DEVICE_DATA xpdd)
-{
+GntTbl_Init(PXENPCI_DEVICE_DATA xpdd) {
   int i;
   int grant_entries;
 
@@ -216,7 +215,7 @@ GntTbl_Init(PXENPCI_DEVICE_DATA xpdd)
     set_xen_guest_handle(reservation.extent_start, &pfn);
     
     FUNCTION_MSG("Calling HYPERVISOR_memory_op - pfn = %x\n", (ULONG)pfn);
-    ret = HYPERVISOR_memory_op(xpdd, XENMEM_decrease_reservation, &reservation);
+    ret = HYPERVISOR_memory_op(XENMEM_decrease_reservation, &reservation);
     FUNCTION_MSG("decreased %d pages for grant table frame %d\n", ret, i);
   }
 
@@ -324,7 +323,7 @@ GntTbl_Resume(PXENPCI_DEVICE_DATA xpdd)
     set_xen_guest_handle(reservation.extent_start, &pfn);
     
     FUNCTION_MSG("Calling HYPERVISOR_memory_op - pfn = %x\n", (ULONG)pfn);
-    ret = HYPERVISOR_memory_op(xpdd, XENMEM_decrease_reservation, &reservation);
+    ret = HYPERVISOR_memory_op(XENMEM_decrease_reservation, &reservation);
     FUNCTION_MSG("decreased %d pages for grant table frame %d\n", ret, i);
   }
 

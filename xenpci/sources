@@ -19,6 +19,6 @@ I386_SOURCES=tpr_emulate.asm
 # dbgprint_hook.asm
 
 SOURCES=xenpci.rc xenpci.c xenpci_fdo.c xenpci_pdo.c xenpci_export.c \
-        evtchn.c gnttbl.c xenbus.c memory.c xenpci_device_interface.c \
+        evtchn.c gnttbl.c xenbus.c xenpci_device_interface.c \
         xenbus_device_interface.c xenpci_highsync.c xenpci_patch_kernel.c \
         xenpci_dbgprint.c

@@ -75,6 +75,7 @@ DEFINE_GUID( GUID_XENPCI_DEVCLASS, 0xC828ABE9, 0x14CA, 0x4445, 0xBA, 0xA6, 0x82,
 #define BALLOON_UNITS_KB (1 * 1024) /* 1MB */
 #define BALLOON_UNIT_PAGES ((BALLOON_UNITS_KB << 10) >> PAGE_SHIFT)
 
+extern PVOID hypercall_stubs;
 extern ULONG qemu_protocol_version;
 extern USHORT xen_version_major;
 extern USHORT xen_version_minor;
@@ -159,8 +160,6 @@ typedef struct {
   
   ULONG platform_ioport_addr;
   ULONG platform_ioport_len;
-
-  char *hypercall_stubs;
 
   evtchn_port_t xenbus_event;
 
@@ -330,6 +329,7 @@ EVT_WDF_FILE_CLOSE XenPci_EvtFileClose;
 EVT_WDF_FILE_CLEANUP XenPci_EvtFileCleanup;
 EVT_WDF_IO_QUEUE_IO_DEFAULT XenPci_EvtIoDefault;
 
+#if 0
 #define HYPERVISOR_memory_op(xpdd, cmd, arg) _HYPERVISOR_memory_op(xpdd->hypercall_stubs, cmd, arg)
 #define HYPERVISOR_xen_version(xpdd, cmd, arg) _HYPERVISOR_xen_version(xpdd->hypercall_stubs, cmd, arg)
 #define HYPERVISOR_grant_table_op(xpdd, cmd, uop, count) _HYPERVISOR_grant_table_op(xpdd->hypercall_stubs, cmd, uop, count)
@@ -342,13 +342,14 @@ EVT_WDF_IO_QUEUE_IO_DEFAULT XenPci_EvtIoDefault;
 #define hvm_set_parameter(xvdd, hvm_param, value) _hvm_set_parameter(xvdd->hypercall_stubs, hvm_param, value);
 #define hvm_shutdown(xvdd, reason) _hvm_shutdown(xvdd->hypercall_stubs, reason);
 #define HYPERVISOR_yield(xvdd) _HYPERVISOR_yield(xvdd->hypercall_stubs);
+#endif
 
 #include "hypercall.h"
 
 #define XBT_NIL ((xenbus_transaction_t)0)
 
-PVOID hvm_get_hypercall_stubs();
-VOID hvm_free_hypercall_stubs(PVOID hypercall_stubs);
+//VOID hvm_get_hypercall_stubs();
+//VOID hvm_free_hypercall_stubs();
 
 EVT_WDF_DEVICE_PREPARE_HARDWARE XenPci_EvtDevicePrepareHardware;
 EVT_WDF_DEVICE_RELEASE_HARDWARE XenPci_EvtDeviceReleaseHardware;

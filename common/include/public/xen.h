@@ -80,6 +80,7 @@
 #define __HYPERVISOR_sysctl               35
 #define __HYPERVISOR_domctl               36
 #define __HYPERVISOR_kexec_op             37
+#define __HYPERVISOR_tmem_op              38
 
 /* Architecture-specific hypercall definitions. */
 #define __HYPERVISOR_arch_0               48
@@ -590,6 +591,28 @@ DEFINE_XEN_GUEST_HANDLE(uint64_t);
 #define mk_unsigned_long(x) x
 
 #endif /* !__ASSEMBLY__ */
+
+#define TMEM_SPEC_VERSION 1
+
+struct tmem_op {
+	uint32_t cmd;
+	int32_t pool_id;
+	union {
+		struct {  /* for cmd == TMEM_NEW_POOL */
+			uint64_t uuid[2];
+			uint32_t flags;
+		} new;
+		struct {
+			uint64_t oid[3];
+			uint32_t index;
+			uint32_t tmem_offset;
+			uint32_t pfn_offset;
+			uint32_t len;
+			XEN_GUEST_HANDLE(void) gmfn; /* guest machine page frame */
+		} gen;
+	} u;
+};
+
 
 /* Default definitions for macros used by domctl/sysctl. */
 #if defined(__XEN__) || defined(__XEN_TOOLS__)

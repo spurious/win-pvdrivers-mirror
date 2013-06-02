@@ -262,6 +262,9 @@ XnBindEvent(XN_HANDLE handle, evtchn_port_t *port, PXN_EVENT_CALLBACK callback, 
 NTSTATUS
 XnUnbindEvent(XN_HANDLE handle, evtchn_port_t port);
 
+ULONG
+XnTmemOp(struct tmem_op *tmem_op);
+
 #ifndef XENPCI_POOL_TAG
 #define XENPCI_POOL_TAG (ULONG) 'XenP'
 #endif
