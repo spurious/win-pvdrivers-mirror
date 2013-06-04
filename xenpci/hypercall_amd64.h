@@ -72,8 +72,7 @@ HYPERVISOR_sched_op(int cmd, void *arg)
 static __inline int
 HYPERVISOR_tmem_op(void *op)
 {
-  PCHAR event_channel_op_func = hypercall_stubs;
-  event_channel_op_func += __HYPERVISOR_event_channel_op * 32;
-  return _hypercall2(event_channel_op_func, (xen_ulong_t)op);
+  PCHAR tmem_op_func = hypercall_stubs;
+  tmem_op_func += __HYPERVISOR_tmem_op * 32;
+  return _hypercall1(tmem_op_func, (xen_ulong_t)op);
 }
-
