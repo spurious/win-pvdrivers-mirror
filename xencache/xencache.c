@@ -267,14 +267,21 @@ XenCache_Pre_WRITE(PFLT_CALLBACK_DATA data, PCFLT_RELATED_OBJECTS flt_objects, P
   pagefile_context_t *context;
   int i;
   KIRQL old_irql;
-  ULONG rc;
+  LONG rc;
   struct tmem_op tmem_op;
 
   UNREFERENCED_PARAMETER(data);
   UNREFERENCED_PARAMETER(flt_objects);
   UNREFERENCED_PARAMETER(completion_context);
 
+  if (global_context.error_count) {
+    return FLT_PREOP_SUCCESS_NO_CALLBACK;
+  }
   if (!FsRtlIsPagingFile(flt_objects->FileObject)) {
+    return FLT_PREOP_SUCCESS_NO_CALLBACK;
+  }
+
+  if (!(data->Flags & FLTFL_CALLBACK_DATA_IRP_OPERATION)) {
     return FLT_PREOP_SUCCESS_NO_CALLBACK;
   }
 
@@ -300,11 +307,14 @@ XenCache_Pre_WRITE(PFLT_CALLBACK_DATA data, PCFLT_RELATED_OBJECTS flt_objects, P
     tmem_op.u.new.flags = (TMEM_SPEC_VERSION << TMEM_VERSION_SHIFT); /* private, not shared */
     context->pool_id = XnTmemOp(&tmem_op);
     FUNCTION_MSG("pool_id = %d\n", context->pool_id);
+    if (context->pool_id < 0) {
+      ExFreePoolWithTag(context, XENCACHE_POOL_TAG);
+      global_context.error_count++;
+      KeReleaseSpinLock(&global_context.lock, old_irql);
+      /* should actually unload here */
+      return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
     global_context.pagefile_head = context;
-  }
-  if (!(data->Flags & FLTFL_CALLBACK_DATA_IRP_OPERATION)) {
-    KeReleaseSpinLock(&global_context.lock, old_irql);
-    return FLT_PREOP_SUCCESS_NO_CALLBACK;
   }
 
   for (i = 0; i < (int)data->Iopb->Parameters.Write.Length >> PAGE_SHIFT; i++) {
@@ -327,6 +337,8 @@ XenCache_Pre_WRITE(PFLT_CALLBACK_DATA data, PCFLT_RELATED_OBJECTS flt_objects, P
       context->put_fail_count++;
     } else {
       FUNCTION_MSG("TMEM_PUT_PAGE = %d\n", rc);
+      context->put_fail_count++;
+      context->error_count++;
     }
   }
   KeReleaseSpinLock(&global_context.lock, old_irql);
@@ -335,6 +347,7 @@ XenCache_Pre_WRITE(PFLT_CALLBACK_DATA data, PCFLT_RELATED_OBJECTS flt_objects, P
     FUNCTION_MSG("   put_fail_count    = %I64d\n", context->put_fail_count);
     FUNCTION_MSG("   get_success_count = %I64d\n", context->get_success_count);
     FUNCTION_MSG("   get_fail_count    = %I64d\n", context->get_fail_count);
+    FUNCTION_MSG("   error_count    = %I64d\n", context->error_count);
   }
   return FLT_PREOP_SUCCESS_NO_CALLBACK;
 }
@@ -345,7 +358,7 @@ XenCache_Pre_READ(PFLT_CALLBACK_DATA data, PCFLT_RELATED_OBJECTS flt_objects, PV
   pagefile_context_t *context;
   KIRQL old_irql;
   int i;
-  ULONG rc;
+  LONG rc;
   struct tmem_op tmem_op;
   
   UNREFERENCED_PARAMETER(data);
@@ -395,6 +408,7 @@ XenCache_Pre_READ(PFLT_CALLBACK_DATA data, PCFLT_RELATED_OBJECTS flt_objects, PV
       FUNCTION_MSG("TMEM_GET_PAGE = %d\n", rc);
       status = FLT_PREOP_SUCCESS_NO_CALLBACK;
       context->get_fail_count++;
+      context->error_count++;
     }
   }
   
@@ -403,6 +417,7 @@ XenCache_Pre_READ(PFLT_CALLBACK_DATA data, PCFLT_RELATED_OBJECTS flt_objects, PV
     FUNCTION_MSG("   put_fail_count    = %I64d\n", context->put_fail_count);
     FUNCTION_MSG("   get_success_count = %I64d\n", context->get_success_count);
     FUNCTION_MSG("   get_fail_count    = %I64d\n", context->get_fail_count);
+    FUNCTION_MSG("   error_count    = %I64d\n", context->error_count);
   }
   KeReleaseSpinLock(&global_context.lock, old_irql);
 

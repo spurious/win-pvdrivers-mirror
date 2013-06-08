@@ -26,7 +26,7 @@ DisplayName    = %XenCache.SVCDESC%
 ServiceBinary  = %12%\xencache.sys
 Dependencies   = FltMgr
 ServiceType    = 2
-StartType      = 3
+StartType      = 0
 ErrorControl   = 1
 LoadOrderGroup = "FSFilter Top"
 AddReg = XenCache_Service.AddReg
@@ -34,7 +34,7 @@ AddReg = XenCache_Service.AddReg
 [XenCache_Service.AddReg]
 HKR,,"DebugFlags",0x00010001 ,0x0
 HKR,"Instances","DefaultInstance",0x00000000,XenCache
-HKR,"Instances\XenCache","Altitude",0x00000000,123456
+HKR,"Instances\XenCache","Altitude",0x00000000,400000
 HKR,"Instances\XenCache","Flags",0x00010001,0
 
 [XenCache.CopyFiles]

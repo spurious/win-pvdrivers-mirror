@@ -39,18 +39,20 @@ typedef struct _global_context_t global_context_t;
 struct _global_context_t {
   KSPIN_LOCK lock;
   pagefile_context_t *pagefile_head;
+  ULONGLONG error_count;
 };
   
 struct _pagefile_context_t {
   pagefile_context_t *next;
   global_context_t *global;
   PFILE_OBJECT file_object;
-  ULONG pool_id;
+  LONG pool_id;
 
   ULONGLONG put_success_count;
   ULONGLONG put_fail_count;
   ULONGLONG get_success_count;
   ULONGLONG get_fail_count;
+  ULONGLONG error_count;
 };
 
 #endif
