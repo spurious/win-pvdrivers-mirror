@@ -155,6 +155,8 @@ static VOID
 XenVbd_SendRequestComplete(WDFREQUEST request, WDFIOTARGET target, PWDF_REQUEST_COMPLETION_PARAMS params, WDFCONTEXT context) {
   NTSTATUS status;
   PSCSI_REQUEST_BLOCK srb = context;
+  LARGE_INTEGER systemtime;
+  ULONGLONG elapsed;
 
   UNREFERENCED_PARAMETER(target);
   UNREFERENCED_PARAMETER(params);
@@ -163,6 +165,12 @@ XenVbd_SendRequestComplete(WDFREQUEST request, WDFIOTARGET target, PWDF_REQUEST_
   status = WdfRequestGetStatus(request);
   if (status != 0 || srb->SrbStatus != SRB_STATUS_SUCCESS) {
     FUNCTION_MSG("Request Status = %08x, SRB Status = %08x\n", status, srb->SrbStatus);
+  }
+  KeQuerySystemTime(&systemtime);
+  elapsed = systemtime.QuadPart - ((PLARGE_INTEGER)((PUCHAR)context + sizeof(SCSI_REQUEST_BLOCK) + sizeof(SRB_IO_CONTROL)))->QuadPart;
+  elapsed = elapsed / 10000; // now in ms
+  if (elapsed > 1000) {
+    FUNCTION_MSG("Event took %d ms\n", (ULONG)elapsed);
   }
   ExFreePoolWithTag(context, XENVBD_POOL_TAG);
   WdfObjectDelete(request);
@@ -181,11 +189,12 @@ XenVbd_SendEvent(WDFDEVICE device) {
 
   status = WdfRequestCreate(WDF_NO_OBJECT_ATTRIBUTES, xvfd->wdf_target, &request);
   if (status != STATUS_SUCCESS) {
+    FUNCTION_MSG("WdfRequestCreate failed %08x\n", status);
     /* this is bad - event will be dropped */
     return;
   }
 
-  buf = ExAllocatePoolWithTag(NonPagedPool, sizeof(SCSI_REQUEST_BLOCK) + sizeof(SRB_IO_CONTROL), XENVBD_POOL_TAG);
+  buf = ExAllocatePoolWithTag(NonPagedPool, sizeof(SCSI_REQUEST_BLOCK) + sizeof(SRB_IO_CONTROL) + sizeof(LARGE_INTEGER), XENVBD_POOL_TAG);
   RtlZeroMemory(buf, sizeof(SCSI_REQUEST_BLOCK) + sizeof(SRB_IO_CONTROL));
   srb = (PSCSI_REQUEST_BLOCK)(buf);
   sic = (PSRB_IO_CONTROL)(buf + sizeof(SCSI_REQUEST_BLOCK));
@@ -205,6 +214,8 @@ XenVbd_SendEvent(WDFDEVICE device) {
   memcpy(sic->Signature, XENVBD_CONTROL_SIG, 8);
   sic->Timeout = (ULONG)-1;
   sic->ControlCode = XENVBD_CONTROL_EVENT;
+  
+  KeQuerySystemTime((PLARGE_INTEGER)((PUCHAR)buf + sizeof(SCSI_REQUEST_BLOCK) + sizeof(SRB_IO_CONTROL)));
 
   RtlZeroMemory(&stack, sizeof(IO_STACK_LOCATION));
   stack.MajorFunction = IRP_MJ_SCSI;
