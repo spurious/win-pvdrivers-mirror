@@ -25,7 +25,7 @@ DRIVER_INITIALIZE DriverEntry;
 
 static EVT_WDF_DRIVER_UNLOAD XenVbd_EvtDriverUnload;
 static EVT_WDF_DRIVER_DEVICE_ADD XenVbd_EvtDeviceAdd;
-static EVT_WDF_REQUEST_COMPLETION_ROUTINE XenVbd_SendRequestComplete;
+static EVT_WDF_REQUEST_COMPLETION_ROUTINE XenVbd_SendEventComplete;
 static EVT_WDF_DEVICE_D0_ENTRY XenVbd_EvtDeviceD0Entry;
 static EVT_WDF_DEVICE_D0_EXIT XenVbd_EvtDeviceD0Exit;
 static EVT_WDFDEVICE_WDM_IRP_PREPROCESS XenVbd_EvtDeviceWdmIrpPreprocess_START_DEVICE;
@@ -152,13 +152,14 @@ XenVbd_StartRing(PXENVBD_DEVICE_DATA xvdd, BOOLEAN suspend) {
 }
 
 static VOID
-XenVbd_SendRequestComplete(WDFREQUEST request, WDFIOTARGET target, PWDF_REQUEST_COMPLETION_PARAMS params, WDFCONTEXT context) {
+XenVbd_SendEventComplete(WDFREQUEST request, WDFIOTARGET target, PWDF_REQUEST_COMPLETION_PARAMS params, WDFCONTEXT context) {
+  WDFDEVICE device = WdfIoTargetGetDevice(target);
+  PXENVBD_FILTER_DATA xvfd = GetXvfd(device);
   NTSTATUS status;
   PSCSI_REQUEST_BLOCK srb = context;
   LARGE_INTEGER systemtime;
   ULONGLONG elapsed;
 
-  UNREFERENCED_PARAMETER(target);
   UNREFERENCED_PARAMETER(params);
   UNREFERENCED_PARAMETER(context);
 
@@ -174,6 +175,20 @@ XenVbd_SendRequestComplete(WDFREQUEST request, WDFIOTARGET target, PWDF_REQUEST_
   }
   ExFreePoolWithTag(context, XENVBD_POOL_TAG);
   WdfObjectDelete(request);
+
+  for (;;) {
+    if (InterlockedCompareExchange(&xvfd->event_state, 0, 1) == 1) {
+      /* no pending event, and we cleared outstanding flag */
+      break;
+    }
+    if (InterlockedCompareExchange(&xvfd->event_state, 1, 2) == 2) {
+      /* there was a pending event, and we set the flag back to outstanding */
+      //FUNCTION_MSG("sending pended event\n");
+      XenVbd_SendEvent(device);
+      break;
+    }
+    /* event_state changed while we were looking at it, go round again */
+  }
 }
 
 static VOID
@@ -223,7 +238,7 @@ XenVbd_SendEvent(WDFDEVICE device) {
   stack.Parameters.Scsi.Srb = srb;
 
   WdfRequestWdmFormatUsingStackLocation(request, &stack);
-  WdfRequestSetCompletionRoutine(request, XenVbd_SendRequestComplete, buf);
+  WdfRequestSetCompletionRoutine(request, XenVbd_SendEventComplete, buf);
   
   WDF_REQUEST_SEND_OPTIONS_INIT(&send_options, 0); //WDF_REQUEST_SEND_OPTION_IGNORE_TARGET_STATE);
   if (!WdfRequestSend(request, xvfd->wdf_target, &send_options)) {
@@ -234,8 +249,21 @@ XenVbd_SendEvent(WDFDEVICE device) {
 static VOID
 XenVbd_EvtDpcEvent(WDFDPC dpc) {
   WDFDEVICE device = WdfDpcGetParentObject(dpc);
+  PXENVBD_FILTER_DATA xvfd = GetXvfd(device);
 
-  XenVbd_SendEvent(device);
+  for (;;) {
+    if (InterlockedCompareExchange(&xvfd->event_state, 1, 0) == 0) {
+      /* was no event outstanding, now there is */
+      XenVbd_SendEvent(device);
+      break;
+    }
+    if (InterlockedCompareExchange(&xvfd->event_state, 2, 1) != 0) {
+      //FUNCTION_MSG("event already in progress\n");
+      /* event was outstanding. either we set the need new event flag or it was already set */
+      break;
+    }
+    /* event_state changed while we were looking at it, go around again */
+  }    
 }  
 
 static VOID

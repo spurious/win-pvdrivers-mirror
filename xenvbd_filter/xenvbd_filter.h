@@ -59,6 +59,8 @@ typedef struct {
   WDFDPC dpc;
   WDFQUEUE io_queue;
   BOOLEAN hibernate_flag;
+  /* event state 0 = no event outstanding, 1 = event outstanding, 2 = need event */
+  LONG event_state;
   
   XENVBD_DEVICE_DATA xvdd;
 } XENVBD_FILTER_DATA, *PXENVBD_FILTER_DATA;
