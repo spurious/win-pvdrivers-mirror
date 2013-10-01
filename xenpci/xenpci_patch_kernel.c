@@ -50,10 +50,8 @@ static ULONG tpr_cache[MAX_VIRT_CPUS];
 static ULONG patch_method;
 
 static ULONG
-SaveTprProcValue(ULONG cpu, ULONG value)
-{
-  switch (patch_method)
-  {
+SaveTprProcValue(ULONG cpu, ULONG value) {
+  switch (patch_method) {
   case PATCH_METHOD_LOCK_MOVE_CR0:
   case PATCH_METHOD_CACHED_TPR:
     tpr_cache[cpu] = value;
@@ -66,13 +64,13 @@ SaveTprProcValue(ULONG cpu, ULONG value)
 }
 
 static ULONG
-SaveTpr()
-{
-  switch (patch_method)
-  {
+SaveTpr() {
+  ULONG cpu = KeGetCurrentProcessorNumber() & 0xff;
+
+  switch (patch_method) {
   case PATCH_METHOD_LOCK_MOVE_CR0:
   case PATCH_METHOD_CACHED_TPR:
-    return SaveTprProcValue(KeGetCurrentProcessorNumber(), *(PULONG)LAPIC_TASKPRI);
+    return SaveTprProcValue(cpu, *(PULONG)LAPIC_TASKPRI);
   case PATCH_METHOD_MAPPED_VLAPIC:
     /* no need to save here */
     break;
@@ -82,16 +80,13 @@ SaveTpr()
 
 /* called with interrupts disabled (via CLI) from an arbitrary location inside HAL.DLL */
 static __inline LONG
-ApicHighestVector(PULONG bitmap)
-{
+ApicHighestVector(PULONG bitmap) {
   int i;
   ULONG bit;
   ULONG value;
-  for (i = 0; i < 8; i++)
-  {
+  for (i = 0; i < 8; i++) {
     value = bitmap[(7 - i) * 4];
-    if (value)
-    {
+    if (value) {
       _BitScanReverse(&bit, value);
       return ((7 - i) << 5) | bit;
     }
@@ -101,14 +96,12 @@ ApicHighestVector(PULONG bitmap)
 
 /* called with interrupts disabled (via CLI) from an arbitrary location inside HAL.DLL */
 VOID
-WriteTpr(ULONG new_tpr_value)
-{
+WriteTpr(ULONG new_tpr_value) {
   LONG ISR;
   LONG IRR;
-  ULONG cpu = KeGetCurrentProcessorNumber();
+  ULONG cpu = KeGetCurrentProcessorNumber() & 0xff;
   
-  switch (patch_method)
-  {
+  switch (patch_method) {
   case PATCH_METHOD_LOCK_MOVE_CR0:
     tpr_cache[cpu] = new_tpr_value;
     __asm {
@@ -118,8 +111,7 @@ WriteTpr(ULONG new_tpr_value)
     }
     break;
   case PATCH_METHOD_CACHED_TPR:
-    if (new_tpr_value != tpr_cache[cpu])
-    {
+    if (new_tpr_value != tpr_cache[cpu]) {
       *(PULONG)LAPIC_TASKPRI = new_tpr_value;
       tpr_cache[cpu] = new_tpr_value;
     }
@@ -142,23 +134,22 @@ WriteTpr(ULONG new_tpr_value)
 
 /* called with interrupts disabled (via CLI) from an arbitrary location inside HAL.DLL */
 ULONG
-ReadTpr()
-{
-  switch (patch_method)
-  {
+ReadTpr() {
+  ULONG cpu = KeGetCurrentProcessorNumber() & 0xff;
+
+  switch (patch_method) {
   case PATCH_METHOD_LOCK_MOVE_CR0:
   case PATCH_METHOD_CACHED_TPR:
-    return tpr_cache[KeGetCurrentProcessorNumber()];
+    return tpr_cache[cpu];
   case PATCH_METHOD_MAPPED_VLAPIC:
-    return *(PULONG)((PUCHAR)lapic[KeGetCurrentProcessorNumber()] + 0x80);
+    return *(PULONG)((PUCHAR)lapic[cpu] + 0x80);
   default:
     return 0;
   }
 }
 
 static __inline VOID
-InsertCallRel32(PUCHAR address, ULONG target)
-{
+InsertCallRel32(PUCHAR address, ULONG target) {
   *address = 0xE8; /* call near */
   *(PULONG)(address + 1) = (ULONG)target - ((ULONG)address + 5);
 }
@@ -178,8 +169,7 @@ typedef struct {
 #define PATCH_2B5   3 /* 2 byte opcode with 1 + 4 bytes of data - replace with nop + nop + call function */
 #define PATCH_2B8   4 /* 2 byte opcode with 4 + 4 bytes of data - replace with push const + call function*/
 
-static patch_t patches[] =
-{
+static patch_t patches[] = {
   { PATCH_1B4,  5, (ULONG)MoveTprToEax,   { 0xa1, TPR_BYTES } },
   { PATCH_2B4,  6, (ULONG)MoveTprToEcx,   { 0x8b, 0x0d, TPR_BYTES } },
   { PATCH_2B4,  6, (ULONG)MoveTprToEdx,   { 0x8b, 0x15, TPR_BYTES } },
@@ -196,20 +186,17 @@ static patch_t patches[] =
 };
 
 static BOOLEAN
-XenPci_TestAndPatchInstruction(PVOID address)
-{
+XenPci_TestAndPatchInstruction(PVOID address) {
   PUCHAR instruction = address;
   ULONG i;
   /* don't declare patches[] on the stack - windows gets grumpy if we allocate too much space on the stack at HIGH_LEVEL */
   
-  for (i = 0; patches[i].patch_type != PATCH_NONE; i++)
-  {
+  for (i = 0; patches[i].patch_type != PATCH_NONE; i++) {
     if (memcmp(address, patches[i].bytes, patches[i].match_size) == 0)
       break;
   }
 
-  switch (patches[i].patch_type)
-  {
+  switch (patches[i].patch_type) {
   case PATCH_1B4:
     InsertCallRel32(instruction + 0, patches[i].function);
     break;
@@ -242,8 +229,7 @@ static PVOID patch_positions[256];
 static PVOID potential_patch_positions[256];
 
 static VOID
-XenPci_DoPatchKernel0(PVOID context)
-{
+XenPci_DoPatchKernel0(PVOID context) {
   patch_info_t *pi = context;
   ULONG i;
   ULONG high_level_tpr;
@@ -258,30 +244,25 @@ XenPci_DoPatchKernel0(PVOID context)
     SaveTprProcValue(i, high_level_tpr);
 
   /* we can't use KdPrint while patching as it may involve the TPR while we are patching it */
-  for (i = 0; i < pi->length; i++)
-  {
-    if (XenPci_TestAndPatchInstruction((PUCHAR)pi->base + i))
-    {
+  for (i = 0; i < pi->length; i++) {
+    if (XenPci_TestAndPatchInstruction((PUCHAR)pi->base + i)) {
       patch_positions[patch_position_index++] = (PUCHAR)pi->base + i;
-    }
-    else if (*(PULONG)((PUCHAR)pi->base + i) == LAPIC_TASKPRI)
-    {
+    } else if (*(PULONG)((PUCHAR)pi->base + i) == LAPIC_TASKPRI) {
       potential_patch_positions[potential_patch_position_index++] = (PUCHAR)pi->base + i;
     }
   }
 
   for (i = 0; i < patch_position_index; i++)
-    KdPrint((__DRIVER_NAME "     Patch added at %p\n", patch_positions[i]));
+    FUNCTION_MSG("Patch added at %p\n", patch_positions[i]);
 
   for (i = 0; i < potential_patch_position_index; i++)
-    KdPrint((__DRIVER_NAME "     Unpatch TPR address found at %p\n", potential_patch_positions[i]));
+    FUNCTION_MSG("Unpatch TPR address found at %p\n", potential_patch_positions[i]);
 
   FUNCTION_EXIT();
 }
 
 static VOID
-XenPci_DoPatchKernelN(PVOID context)
-{
+XenPci_DoPatchKernelN(PVOID context) {
   UNREFERENCED_PARAMETER(context);
   
   FUNCTION_ENTER();
@@ -290,8 +271,7 @@ XenPci_DoPatchKernelN(PVOID context)
 }
 
 static BOOLEAN
-IsMoveCr8Supported()
-{
+IsMoveCr8Supported() {
   DWORD32 cpuid_output[4];
   
   __cpuid(cpuid_output, 0x80000001UL);
@@ -302,8 +282,7 @@ IsMoveCr8Supported()
 }
 
 static ULONG
-MapVlapic(PXENPCI_DEVICE_DATA xpdd)
-{
+MapVlapic(PXENPCI_DEVICE_DATA xpdd) {
   struct xen_add_to_physmap xatp;
   ULONG rc = EINVAL;
   ULONG ActiveProcessorCount;
@@ -317,9 +296,8 @@ MapVlapic(PXENPCI_DEVICE_DATA xpdd)
   ActiveProcessorCount = (ULONG)*KeNumberProcessors;
 #endif
 
-  for (i = 0; i < (int)ActiveProcessorCount; i++)
-  {
-    KdPrint((__DRIVER_NAME "     mapping lapic for cpu = %d\n", i));
+  for (i = 0; i < (int)ActiveProcessorCount; i++) {
+    FUNCTION_MSG("mapping lapic for cpu = %d\n", i);
 
     lapic_page[i] = XenPci_AllocMMIO(xpdd, PAGE_SIZE);
     lapic[i] = MmMapIoSpace(lapic_page[i], PAGE_SIZE, MmCached);
@@ -328,11 +306,10 @@ MapVlapic(PXENPCI_DEVICE_DATA xpdd)
     xatp.idx = i;
     xatp.space = XENMAPSPACE_vlapic;
     xatp.gpfn = (xen_pfn_t)(lapic_page[i].QuadPart >> PAGE_SHIFT);
-    KdPrint((__DRIVER_NAME "     gpfn = %x\n", xatp.gpfn));
+    FUNCTION_MSG("gpfn = %x\n", xatp.gpfn);
     rc = HYPERVISOR_memory_op(XENMEM_add_to_physmap, &xatp);
-    KdPrint((__DRIVER_NAME "     hypervisor memory op (XENMAPSPACE_vlapic_regs) ret = %d\n", rc));
-    if (rc != 0)
-    {
+    FUNCTION_MSG("hypervisor memory op (XENMAPSPACE_vlapic_regs) ret = %d\n", rc);
+    if (rc != 0) {
       FUNCTION_EXIT();
       return rc;
     }
@@ -343,8 +320,7 @@ MapVlapic(PXENPCI_DEVICE_DATA xpdd)
 }
 
 VOID
-XenPci_PatchKernel(PXENPCI_DEVICE_DATA xpdd, PVOID base, ULONG length)
-{
+XenPci_PatchKernel(PXENPCI_DEVICE_DATA xpdd, PVOID base, ULONG length) {
   patch_info_t patch_info;
   ULONG rc;
 #if (NTDDI_VERSION >= NTDDI_WINXP)
@@ -358,46 +334,36 @@ XenPci_PatchKernel(PXENPCI_DEVICE_DATA xpdd, PVOID base, ULONG length)
   version_info.dwOSVersionInfoSize = sizeof(RTL_OSVERSIONINFOEXW);
 
   RtlGetVersion((PRTL_OSVERSIONINFOW)&version_info);
-  if (version_info.dwMajorVersion >= 6)
-  {
-    KdPrint((__DRIVER_NAME "     Vista or newer - no need for patch\n"));
+  if (version_info.dwMajorVersion >= 6) {
+    FUNCTION_MSG("Vista or newer - no need for patch\n");
     return;
   }
   if (version_info.dwMajorVersion == 5
-      && version_info.dwMinorVersion > 2)
-  {
-    KdPrint((__DRIVER_NAME "     Windows 2003 sp2 or newer - no need for patch\n"));
+      && version_info.dwMinorVersion > 2) {
+    FUNCTION_MSG("Windows 2003 sp2 or newer - no need for patch\n");
     return;
   }
   if (version_info.dwMajorVersion == 5
       && version_info.dwMinorVersion == 2
-      && version_info.wServicePackMajor >= 2)
-  {
-    KdPrint((__DRIVER_NAME "     Windows 2003 sp2 or newer - no need for patch\n"));
+      && version_info.wServicePackMajor >= 2) {
+    FUNCTION_MSG("Windows 2003 sp2 or newer - no need for patch\n");
     return;
   }
 #endif
-  if (IsMoveCr8Supported())
-  {
-    KdPrint((__DRIVER_NAME "     Using LOCK MOVE CR0 TPR patch\n"));
+  if (IsMoveCr8Supported()) {
+    FUNCTION_MSG("Using LOCK MOVE CR0 TPR patch\n");
     patch_method = PATCH_METHOD_LOCK_MOVE_CR0;
-  }
-  else
-  {
+  } else {
     rc = MapVlapic(xpdd);
-    if (rc == EACCES)
-    {
-      KdPrint((__DRIVER_NAME "     Xen already using VMX LAPIC acceleration. No patch required\n"));
+    if (rc == -EACCES) {
+      FUNCTION_MSG("Xen already using VMX LAPIC acceleration. No patch required\n");
       return;
     }
-    if (!rc)
-    {
-      KdPrint((__DRIVER_NAME "     Using mapped vLAPIC TPR patch\n"));
+    if (!rc) {
+      FUNCTION_MSG("Using mapped vLAPIC TPR patch\n");
       patch_method = PATCH_METHOD_MAPPED_VLAPIC;
-    }
-    else
-    {
-      KdPrint((__DRIVER_NAME "     Using cached TPR patch\n"));
+    } else {
+      FUNCTION_MSG("Using cached TPR patch\n");
       patch_method = PATCH_METHOD_CACHED_TPR;
     }
   }
@@ -414,8 +380,7 @@ XenPci_PatchKernel(PXENPCI_DEVICE_DATA xpdd, PVOID base, ULONG length)
 #else
 
 VOID
-XenPci_PatchKernel(PXENPCI_DEVICE_DATA xpdd, PVOID base, ULONG length)
-{
+XenPci_PatchKernel(PXENPCI_DEVICE_DATA xpdd, PVOID base, ULONG length) {
   UNREFERENCED_PARAMETER(xpdd);
   UNREFERENCED_PARAMETER(base);
   UNREFERENCED_PARAMETER(length);
