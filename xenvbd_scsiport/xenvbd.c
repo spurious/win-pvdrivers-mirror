@@ -241,6 +241,20 @@ XenVbd_CompleteDisconnect(PXENVBD_DEVICE_DATA xvdd) {
   }
 }
 
+static VOID
+XenVbd_HwScsiTimer(PVOID DeviceExtension) {
+  PXENVBD_SCSIPORT_DATA xvsd = DeviceExtension;
+  PXENVBD_DEVICE_DATA xvdd = (PXENVBD_DEVICE_DATA)xvsd->xvdd;
+
+  //FUNCTION_MSG("HwScsiTimer\n");
+  XenVbd_HandleEvent(xvdd);
+  if (xvsd->outstanding) {
+    ScsiPortNotification(RequestTimerCall, xvsd, XenVbd_HwScsiTimer, 100000);
+  } else {
+    ScsiPortNotification(RequestTimerCall, xvsd, XenVbd_HwScsiTimer, 0);
+  }
+}
+
 static BOOLEAN
 XenVbd_HwScsiStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb) {
   PXENVBD_SCSIPORT_DATA xvsd = DeviceExtension;
@@ -296,6 +310,12 @@ XenVbd_HwScsiStartIo(PVOID DeviceExtension, PSCSI_REQUEST_BLOCK srb) {
     ScsiPortNotification(NextLuRequest, xvsd, 0, 0, 0);
   } else {
     ScsiPortNotification(NextRequest, xvsd);
+  }
+  /* if there was an error returned by an SRB then the queue will freeze. Queue a timer to resolve this */
+  if (xvsd->outstanding) {
+    ScsiPortNotification(RequestTimerCall, xvsd, XenVbd_HwScsiTimer, 100000);
+  } else {
+    ScsiPortNotification(RequestTimerCall, xvsd, XenVbd_HwScsiTimer, 0);
   }
   return TRUE;
 }
