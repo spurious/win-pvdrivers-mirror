@@ -156,7 +156,7 @@ XenNet_ParsePacketHeader(packet_info_t *pi, PUCHAR alt_buffer, ULONG min_header_
     //KdPrint((__DRIVER_NAME "     IP\n"));
     if (pi->header_length < (ULONG)(XN_HDR_SIZE + 20)) {
       if (!XenNet_BuildHeader(pi, NULL, (ULONG)(XN_HDR_SIZE + 20))) {
-        KdPrint((__DRIVER_NAME "     packet too small (IP Header)\n"));
+        FUNCTION_MSG("packet too small (IP Header)\n");
         pi->parse_result = PARSE_TOO_SMALL;
         return;
       }

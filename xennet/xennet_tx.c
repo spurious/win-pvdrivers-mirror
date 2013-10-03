@@ -191,7 +191,7 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER packet) {
       flags |= NETTXF_csum_blank | NETTXF_data_validated;
     }
   } else if (csum_info.Transmit.IsIPv6) {
-    KdPrint((__DRIVER_NAME "     Transmit.IsIPv6 not supported\n"));
+    FUNCTION_MSG("Transmit.IsIPv6 not supported\n");
   }
   #endif
   
@@ -273,13 +273,13 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER packet) {
       if (!coalesce_buf) {
         gref = XnAllocateGrant(xi->handle, (ULONG)'XNTX');
         if (gref == INVALID_GRANT_REF) {
-          KdPrint((__DRIVER_NAME "     out of grefs - partial send\n"));
+          FUNCTION_MSG("out of grefs - partial send\n");
           break;
         }
         coalesce_buf = NdisAllocateFromNPagedLookasideList(&xi->tx_lookaside_list);
         if (!coalesce_buf) {
           XnFreeGrant(xi->handle, gref, (ULONG)'XNTX');
-          KdPrint((__DRIVER_NAME "     out of memory - partial send\n"));
+          FUNCTION_MSG("out of memory - partial send\n");
           break;
         }
         coalesce_remaining = min(PAGE_SIZE, remaining);
@@ -287,7 +287,7 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER packet) {
       length = XenNet_QueryData(&pi, coalesce_remaining);
       va = NdisBufferVirtualAddressSafe(pi.curr_mdl, LowPagePriority);
       if (!va) {
-        KdPrint((__DRIVER_NAME "     failed to map buffer va - partial send\n"));
+        FUNCTION_MSG("failed to map buffer va - partial send\n");
         coalesce_remaining = 0;
         remaining -= min(PAGE_SIZE, remaining);
         NdisFreeToNPagedLookasideList(&xi->tx_lookaside_list, coalesce_buf);
@@ -316,7 +316,7 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER packet) {
       
       gref = XnAllocateGrant(xi->handle, (ULONG)'XNTX');
       if (gref == INVALID_GRANT_REF) {
-        KdPrint((__DRIVER_NAME "     out of grefs - partial send\n"));
+        FUNCTION_MSG("out of grefs - partial send\n");
         break;
       }
       txN = RING_GET_REQUEST(&xi->tx_ring, xi->tx_ring.req_prod_pvt);
@@ -684,7 +684,7 @@ XenNet_TxShutdown(xennet_info_t *xi) {
 
   while (xi->tx_outstanding) {
     KeReleaseSpinLock(&xi->tx_lock, old_irql);
-    KdPrint((__DRIVER_NAME "     Waiting for %d remaining packets to be sent\n", xi->tx_outstanding));
+    FUNCTION_MSG("Waiting for %d remaining packets to be sent\n", xi->tx_outstanding);
     timeout.QuadPart = -1 * 1 * 1000 * 1000 * 10; /* 1 second */
     KeWaitForSingleObject(&xi->tx_idle_event, Executive, KernelMode, FALSE, &timeout);
     KeAcquireSpinLock(&xi->tx_lock, &old_irql);
