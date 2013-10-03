@@ -45,8 +45,7 @@ static PHYSICAL_ADDRESS lapic_page[MAX_VIRT_CPUS];
 static volatile PVOID lapic[MAX_VIRT_CPUS];
 static ULONG tpr_cache[MAX_VIRT_CPUS];
 #define PATCH_METHOD_LOCK_MOVE_CR0 1
-#define PATCH_METHOD_MAPPED_VLAPIC 2
-#define PATCH_METHOD_CACHED_TPR    3
+#define PATCH_METHOD_CACHED_TPR    2
 static ULONG patch_method;
 
 static ULONG
@@ -55,9 +54,6 @@ SaveTprProcValue(ULONG cpu, ULONG value) {
   case PATCH_METHOD_LOCK_MOVE_CR0:
   case PATCH_METHOD_CACHED_TPR:
     tpr_cache[cpu] = value;
-    break;
-  case PATCH_METHOD_MAPPED_VLAPIC:
-    /* no need to save here */
     break;
   }
   return value;
@@ -71,9 +67,6 @@ SaveTpr() {
   case PATCH_METHOD_LOCK_MOVE_CR0:
   case PATCH_METHOD_CACHED_TPR:
     return SaveTprProcValue(cpu, *(PULONG)LAPIC_TASKPRI);
-  case PATCH_METHOD_MAPPED_VLAPIC:
-    /* no need to save here */
-    break;
   }
   return 0;
 }
@@ -116,19 +109,6 @@ WriteTpr(ULONG new_tpr_value) {
       tpr_cache[cpu] = new_tpr_value;
     }
     break;
-  case PATCH_METHOD_MAPPED_VLAPIC:
-    /* need to set the new tpr value and then check for pending interrupts to avoid a race */
-    *(PULONG)((PUCHAR)lapic[cpu] + 0x80) = new_tpr_value & 0xff;
-    KeMemoryBarrier();
-    IRR = ApicHighestVector((PULONG)((PUCHAR)lapic[cpu] + 0x200));
-    if (IRR == -1)
-      return;
-    ISR = ApicHighestVector((PULONG)((PUCHAR)lapic[cpu] + 0x100));
-    if (ISR == -1)
-      ISR = 0;
-    if ((ULONG)(IRR >> 4) > max((ULONG)(ISR >> 4), ((new_tpr_value & 0xf0) >> 4)))
-      *(PULONG)LAPIC_TASKPRI = new_tpr_value;
-    break;
   }
 }
 
@@ -141,8 +121,6 @@ ReadTpr() {
   case PATCH_METHOD_LOCK_MOVE_CR0:
   case PATCH_METHOD_CACHED_TPR:
     return tpr_cache[cpu];
-  case PATCH_METHOD_MAPPED_VLAPIC:
-    return *(PULONG)((PUCHAR)lapic[cpu] + 0x80);
   default:
     return 0;
   }
@@ -281,48 +259,9 @@ IsMoveCr8Supported() {
     return FALSE;
 }
 
-static ULONG
-MapVlapic(PXENPCI_DEVICE_DATA xpdd) {
-  struct xen_add_to_physmap xatp;
-  ULONG rc = EINVAL;
-  ULONG ActiveProcessorCount;
-  int i;
-
-  FUNCTION_ENTER();
-  
-#if (NTDDI_VERSION >= NTDDI_WINXP)
-  ActiveProcessorCount = (ULONG)KeNumberProcessors;
-#else
-  ActiveProcessorCount = (ULONG)*KeNumberProcessors;
-#endif
-
-  for (i = 0; i < (int)ActiveProcessorCount; i++) {
-    FUNCTION_MSG("mapping lapic for cpu = %d\n", i);
-
-    lapic_page[i] = XenPci_AllocMMIO(xpdd, PAGE_SIZE);
-    lapic[i] = MmMapIoSpace(lapic_page[i], PAGE_SIZE, MmCached);
-
-    xatp.domid = DOMID_SELF;
-    xatp.idx = i;
-    xatp.space = XENMAPSPACE_vlapic;
-    xatp.gpfn = (xen_pfn_t)(lapic_page[i].QuadPart >> PAGE_SHIFT);
-    FUNCTION_MSG("gpfn = %x\n", xatp.gpfn);
-    rc = HYPERVISOR_memory_op(XENMEM_add_to_physmap, &xatp);
-    FUNCTION_MSG("hypervisor memory op (XENMAPSPACE_vlapic_regs) ret = %d\n", rc);
-    if (rc != 0) {
-      FUNCTION_EXIT();
-      return rc;
-    }
-  }
-  FUNCTION_EXIT();
-
-  return rc;
-}
-
 VOID
 XenPci_PatchKernel(PXENPCI_DEVICE_DATA xpdd, PVOID base, ULONG length) {
   patch_info_t patch_info;
-  ULONG rc;
 #if (NTDDI_VERSION >= NTDDI_WINXP)
   RTL_OSVERSIONINFOEXW version_info;
 #endif
@@ -354,18 +293,8 @@ XenPci_PatchKernel(PXENPCI_DEVICE_DATA xpdd, PVOID base, ULONG length) {
     FUNCTION_MSG("Using LOCK MOVE CR0 TPR patch\n");
     patch_method = PATCH_METHOD_LOCK_MOVE_CR0;
   } else {
-    rc = MapVlapic(xpdd);
-    if (rc == -EACCES) {
-      FUNCTION_MSG("Xen already using VMX LAPIC acceleration. No patch required\n");
-      return;
-    }
-    if (!rc) {
-      FUNCTION_MSG("Using mapped vLAPIC TPR patch\n");
-      patch_method = PATCH_METHOD_MAPPED_VLAPIC;
-    } else {
-      FUNCTION_MSG("Using cached TPR patch\n");
-      patch_method = PATCH_METHOD_CACHED_TPR;
-    }
+    FUNCTION_MSG("Using cached TPR patch\n");
+    patch_method = PATCH_METHOD_CACHED_TPR;
   }
   patch_info.base = base;
   patch_info.length = length;
