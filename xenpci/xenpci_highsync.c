@@ -44,12 +44,7 @@ struct {
 } typedef highsync_info_t;
 
 static VOID
-XenPci_HighSyncCallFunction0(
-  PRKDPC Dpc,
-  PVOID Context,
-  PVOID SystemArgument1,
-  PVOID SystemArgument2)
-{
+XenPci_HighSyncCallFunction0(PRKDPC Dpc, PVOID Context, PVOID SystemArgument1, PVOID SystemArgument2) {
   highsync_info_t *highsync_info = Context;
   ULONG ActiveProcessorCount;
   KIRQL old_irql;
@@ -65,18 +60,15 @@ XenPci_HighSyncCallFunction0(
   ActiveProcessorCount = (ULONG)*KeNumberProcessors;
 #endif
   InterlockedIncrement(&highsync_info->nr_procs_at_dispatch_level);
-  if (highsync_info->sync_level > DISPATCH_LEVEL)
-  {
-    while (highsync_info->nr_procs_at_dispatch_level < (LONG)ActiveProcessorCount)
-    {
+  if (highsync_info->sync_level > DISPATCH_LEVEL) {
+    while (highsync_info->nr_procs_at_dispatch_level < (LONG)ActiveProcessorCount) {
       KeStallExecutionProcessor(1);
       KeMemoryBarrier();
     }
   }
   _disable(); //__asm cli;  
   KeRaiseIrql(highsync_info->sync_level, &old_irql);
-  while (highsync_info->nr_spinning_at_sync_level < (LONG)ActiveProcessorCount - 1)
-  {
+  while (highsync_info->nr_spinning_at_sync_level < (LONG)ActiveProcessorCount - 1) {
     KeStallExecutionProcessor(1);
     KeMemoryBarrier();
   }
@@ -86,15 +78,13 @@ XenPci_HighSyncCallFunction0(
   highsync_info->do_spin = FALSE;
   KeMemoryBarrier();  
   /* wait for all the other processors to complete spinning, just in case it matters */
-  while (highsync_info->nr_spinning_at_sync_level)
-  {
+  while (highsync_info->nr_spinning_at_sync_level) {
     KeStallExecutionProcessor(1);
     KeMemoryBarrier();
   }
   InterlockedDecrement(&highsync_info->nr_procs_at_dispatch_level);
   /* wait until nr_procs_at_dispatch_level drops to 0 indicating that nothing else requires highsync_info */
-  while (highsync_info->nr_procs_at_dispatch_level)
-  {
+  while (highsync_info->nr_procs_at_dispatch_level) {
     KeStallExecutionProcessor(1);
     KeMemoryBarrier();
   }
@@ -104,12 +94,7 @@ XenPci_HighSyncCallFunction0(
 }
 
 static VOID
-XenPci_HighSyncCallFunctionN(
-  PRKDPC Dpc,
-  PVOID Context,
-  PVOID SystemArgument1,
-  PVOID SystemArgument2)
-{
+XenPci_HighSyncCallFunctionN(PRKDPC Dpc, PVOID Context, PVOID SystemArgument1, PVOID SystemArgument2) {
   highsync_info_t *highsync_info = Context;
   ULONG ActiveProcessorCount;
   KIRQL old_irql;
@@ -121,17 +106,15 @@ XenPci_HighSyncCallFunctionN(
   FUNCTION_ENTER();
   FUNCTION_MSG("(CPU = %d)\n", KeGetCurrentProcessorNumber());
 
-  KdPrint((__DRIVER_NAME "     CPU %d spinning...\n", KeGetCurrentProcessorNumber()));
+  FUNCTION_MSG("CPU %d spinning...\n", KeGetCurrentProcessorNumber());
   InterlockedIncrement(&highsync_info->nr_procs_at_dispatch_level);
-  if (highsync_info->sync_level > DISPATCH_LEVEL)
-  {
+  if (highsync_info->sync_level > DISPATCH_LEVEL) {
 #if (NTDDI_VERSION >= NTDDI_WINXP)
     ActiveProcessorCount = (ULONG)KeNumberProcessors;
 #else
     ActiveProcessorCount = (ULONG)*KeNumberProcessors;
 #endif
-    while (highsync_info->nr_procs_at_dispatch_level < (LONG)ActiveProcessorCount)
-    {
+    while (highsync_info->nr_procs_at_dispatch_level < (LONG)ActiveProcessorCount) {
       KeStallExecutionProcessor(1);
       KeMemoryBarrier();
     }
@@ -139,8 +122,7 @@ XenPci_HighSyncCallFunctionN(
   _disable(); //__asm cli;  
   KeRaiseIrql(highsync_info->sync_level, &old_irql);
   InterlockedIncrement(&highsync_info->nr_spinning_at_sync_level);
-  while(highsync_info->do_spin)
-  {
+  while(highsync_info->do_spin) {
     KeStallExecutionProcessor(1);
     KeMemoryBarrier();
   }
@@ -154,8 +136,7 @@ XenPci_HighSyncCallFunctionN(
 }
 
 VOID
-XenPci_HighSync(PXENPCI_HIGHSYNC_FUNCTION function0, PXENPCI_HIGHSYNC_FUNCTION functionN, PVOID context)
-{
+XenPci_HighSync(PXENPCI_HIGHSYNC_FUNCTION function0, PXENPCI_HIGHSYNC_FUNCTION functionN, PVOID context) {
   ULONG ActiveProcessorCount;
   ULONG i;
   highsync_info_t *highsync_info;
@@ -171,7 +152,7 @@ XenPci_HighSync(PXENPCI_HIGHSYNC_FUNCTION function0, PXENPCI_HIGHSYNC_FUNCTION f
   highsync_info->functionN = functionN;
   highsync_info->context = context;
   highsync_info->sync_level = HIGH_LEVEL;
-
+  
 #if (NTDDI_VERSION >= NTDDI_WINXP)
   ActiveProcessorCount = (ULONG)KeNumberProcessors;
 #else
@@ -182,23 +163,22 @@ XenPci_HighSync(PXENPCI_HIGHSYNC_FUNCTION function0, PXENPCI_HIGHSYNC_FUNCTION f
   KeRaiseIrql(highsync_info->sync_level, &old_irql);
 
   highsync_info->do_spin = TRUE;
-  for (i = 0; i < ActiveProcessorCount; i++)
-  {
+  for (i = 0; i < ActiveProcessorCount; i++) {
     if (i == 0)
       KeInitializeDpc(&highsync_info->dpcs[i], XenPci_HighSyncCallFunction0, highsync_info);
     else
       KeInitializeDpc(&highsync_info->dpcs[i], XenPci_HighSyncCallFunctionN, highsync_info);
     KeSetTargetProcessorDpc(&highsync_info->dpcs[i], (CCHAR)i);
     KeSetImportanceDpc(&highsync_info->dpcs[i], HighImportance);
-    KdPrint((__DRIVER_NAME "     queuing Dpc for CPU %d\n", i));
+    FUNCTION_MSG("queuing Dpc for CPU %d\n", i);
     KeInsertQueueDpc(&highsync_info->dpcs[i], NULL, NULL);
   }
-  KdPrint((__DRIVER_NAME "     All Dpc's queued\n"));
+  FUNCTION_MSG("All Dpc's queued\n");
 
   KeMemoryBarrier();
   KeLowerIrql(old_irql);
 
-  KdPrint((__DRIVER_NAME "     Waiting for highsync_complete_event\n"));
+  FUNCTION_MSG("Waiting for highsync_complete_event\n");
   KeWaitForSingleObject(&highsync_info->highsync_complete_event, Executive, KernelMode, FALSE, NULL);
 #if (NTDDI_VERSION >= NTDDI_WINXP)
   KeFlushQueuedDpcs();
