@@ -90,8 +90,6 @@ ApicHighestVector(PULONG bitmap) {
 /* called with interrupts disabled (via CLI) from an arbitrary location inside HAL.DLL */
 VOID
 WriteTpr(ULONG new_tpr_value) {
-  LONG ISR;
-  LONG IRR;
   ULONG cpu = KeGetCurrentProcessorNumber() & 0xff;
   
   switch (patch_method) {
