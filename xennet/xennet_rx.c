@@ -20,6 +20,56 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 #include "xennet.h"
 
+#define RX_STATS
+
+#ifdef RX_STATS
+static ULONG x_packet_allocated = 0;
+static ULONG x_packet_freed = 0;
+static ULONG x_packet_resources = 0;
+
+static ULONG x_0_64_packet_indicated = 0;
+static ULONG x_65_128_packet_indicated = 0;
+static ULONG x_129_256_packet_indicated = 0;
+static ULONG x_257_512_packet_indicated = 0;
+static ULONG x_513_1024_packet_indicated = 0;
+static ULONG x_1025_1514_packet_indicated = 0;
+static ULONG x_1515_65535_packet_indicated = 0;
+static ULONG x_0_64_packet_returned = 0;
+static ULONG x_65_128_packet_returned = 0;
+static ULONG x_129_256_packet_returned = 0;
+static ULONG x_257_512_packet_returned = 0;
+static ULONG x_513_1024_packet_returned = 0;
+static ULONG x_1025_1514_packet_returned = 0;
+static ULONG x_1515_65535_packet_returned = 0;
+
+static ULONG x_1_frag_packet_indicated = 0;
+static ULONG x_2_frag_packet_indicated = 0;
+static ULONG x_3_frag_packet_indicated = 0;
+static ULONG x_4_or_more_frag_packet_indicated = 0;
+static ULONG x_1_frag_packet_returned = 0;
+static ULONG x_2_frag_packet_returned = 0;
+static ULONG x_3_frag_packet_returned = 0;
+static ULONG x_4_or_more_frag_packet_returned = 0;
+
+static LARGE_INTEGER x_next_print_time = {0};
+
+static VOID
+dump_x_stats() {
+  FUNCTION_MSG("x_pkt_allocated (outstanding, resources) = %d (%d, %d)\n", x_packet_allocated, x_packet_allocated - x_packet_freed, x_packet_resources);
+  FUNCTION_MSG("x_0_64_pkt_indicated (outstanding)       = %d (%d)\n", x_0_64_packet_indicated, x_0_64_packet_indicated - x_0_64_packet_returned);
+  FUNCTION_MSG("x_65_128_pkt_indicated (outstanding)     = %d (%d)\n", x_65_128_packet_indicated, x_65_128_packet_indicated - x_65_128_packet_returned);
+  FUNCTION_MSG("x_129_256_pkt_indicated (outstanding)    = %d (%d)\n", x_129_256_packet_indicated, x_129_256_packet_indicated - x_129_256_packet_returned);
+  FUNCTION_MSG("x_257_512_pkt_indicated (outstanding)    = %d (%d)\n", x_257_512_packet_indicated, x_257_512_packet_indicated - x_257_512_packet_returned);
+  FUNCTION_MSG("x_513_1024_pkt_indicated (outstanding)   = %d (%d)\n", x_513_1024_packet_indicated, x_513_1024_packet_indicated - x_513_1024_packet_returned);
+  FUNCTION_MSG("x_1025_1514_pkt_indicated (outstanding)  = %d (%d)\n", x_1025_1514_packet_indicated, x_1025_1514_packet_indicated - x_1025_1514_packet_returned);
+  FUNCTION_MSG("x_1515_65535_pkt_indicated (outstanding) = %d (%d)\n", x_1515_65535_packet_indicated, x_1515_65535_packet_indicated - x_1515_65535_packet_returned);
+  FUNCTION_MSG("x_1_frag_pkt_indicated (outstanding)     = %d (%d)\n", x_1_frag_packet_indicated, x_1_frag_packet_indicated - x_1_frag_packet_returned);
+  FUNCTION_MSG("x_2_frag_pkt_indicated (outstanding)     = %d (%d)\n", x_2_frag_packet_indicated, x_2_frag_packet_indicated - x_2_frag_packet_returned);
+  FUNCTION_MSG("x_3_frag_pkt_indicated (outstanding)     = %d (%d)\n", x_3_frag_packet_indicated, x_3_frag_packet_indicated - x_3_frag_packet_returned);
+  FUNCTION_MSG("x_4+_frag_pkt_indicated (outstanding)    = %d (%d)\n", x_4_or_more_frag_packet_indicated, x_4_or_more_frag_packet_indicated - x_4_or_more_frag_packet_returned);
+}
+#endif
+
 static __inline shared_buffer_t *
 get_pb_from_freelist(struct xennet_info *xi)
 {
@@ -165,7 +215,7 @@ XenNet_FillRing(struct xennet_info *xi)
   for (i = 0; i < batch_target; i++) {
     page_buf = get_pb_from_freelist(xi);
     if (!page_buf) {
-      KdPrint((__DRIVER_NAME "     Added %d out of %d buffers to rx ring (no free pages)\n", i, batch_target));
+      FUNCTION_MSG("Added %d out of %d buffers to rx ring (no free pages)\n", i, batch_target);
       break;
     }
     xi->rx_id_free--;
@@ -305,7 +355,7 @@ XenNet_SumPacketData(
     if (buffer_offset == buffer_length && i < total_length) {
       NdisGetNextBuffer(mdl, &mdl);
       if (mdl == NULL) {
-        KdPrint((__DRIVER_NAME "     Ran out of buffers\n"));
+        FUNCTION_MSG(__DRIVER_NAME "     Ran out of buffers\n");
         return FALSE; // should never happen
       }
       NdisQueryBufferSafe(mdl, &buffer, &buffer_length, NormalPagePriority);
@@ -340,9 +390,10 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
   ULONG out_remaining;
   ULONG header_extra;
   shared_buffer_t *header_buf;
+  ULONG outstanding;
   #if NTDDI_VERSION < NTDDI_VISTA
   PNDIS_TCP_IP_CHECKSUM_PACKET_INFO csum_info;
-  UINT packet_length;
+  //UINT packet_length;
   #else
   NDIS_TCP_IP_CHECKSUM_NET_BUFFER_LIST_INFO csum_info;
   #endif
@@ -354,20 +405,22 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
     FUNCTION_MSG("No free packets\n");
     return FALSE;
   }
+  
+  InterlockedIncrement((PLONG)&x_packet_allocated);
   NdisZeroMemory(packet->MiniportReservedEx, sizeof(packet->MiniportReservedEx));
   NDIS_SET_PACKET_HEADER_SIZE(packet, XN_HDR_SIZE);
   #else  
   nbl = NdisAllocateNetBufferList(xi->rx_nbl_pool, 0, 0);
   if (!nbl) {
     /* buffers will be freed in MakePackets */
-    KdPrint((__DRIVER_NAME "     No free nbls\n"));
+    FUNCTION_MSG("No free nbls\n");
     //FUNCTION_EXIT();
     return FALSE;
   }
 
   packet = NdisAllocateNetBuffer(xi->rx_packet_pool, NULL, 0, 0);
   if (!packet) {
-    KdPrint((__DRIVER_NAME "     No free packets\n"));
+    FUNCTION_MSG("No free packets\n");
     NdisFreeNetBufferList(nbl);
     //FUNCTION_EXIT();
     return FALSE;
@@ -398,6 +451,7 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
       #if NTDDI_VERSION < NTDDI_VISTA
       NdisUnchainBufferAtFront(packet, &curr_mdl);
       NdisFreePacket(packet);
+      InterlockedIncrement((PLONG)&x_packet_freed);
       #else
       NdisFreeNetBufferList(nbl);
       NdisFreeNetBuffer(packet);
@@ -458,7 +512,7 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
       //  FUNCTION_MSG("in loop - out_remaining = %d, curr_buffer = %p, curr_pb = %p\n", out_remaining, pi->curr_mdl, pi->curr_pb);
       //}
       if (!pi->curr_mdl || !pi->curr_pb) {
-        KdPrint((__DRIVER_NAME "     out of buffers for packet\n"));
+        FUNCTION_MSG("out of buffers for packet\n");
         //KdPrint((__DRIVER_NAME "     out_remaining = %d, curr_buffer = %p, curr_pb = %p\n", out_remaining, pi->curr_mdl, pi->curr_pb));
         // TODO: free some stuff or we'll leak
         /* unchain buffers then free packet */
@@ -603,7 +657,15 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
   }
   #endif
 
+  outstanding = InterlockedIncrement(&xi->rx_outstanding);
   #if NTDDI_VERSION < NTDDI_VISTA
+  if (outstanding > RX_PACKET_HIGH_WATER_MARK || !xi->rx_pb_free) {
+    NDIS_SET_PACKET_STATUS(packet, NDIS_STATUS_RESOURCES);
+    InterlockedIncrement((PLONG)&x_packet_resources);
+  } else {
+    NDIS_SET_PACKET_STATUS(packet, NDIS_STATUS_SUCCESS);
+  }
+  #if 0
   /* windows gets lazy about ack packets and holds on to them forever under high load situations. we don't like this */
   NdisQueryPacketLength(packet, &packet_length);
   if (pi->parse_result != PARSE_OK || (pi->ip_proto == 6 && packet_length <= NDIS_STATUS_RESOURCES_MAX_LENGTH))
@@ -611,9 +673,8 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
   else
     NDIS_SET_PACKET_STATUS(packet, NDIS_STATUS_SUCCESS);
   #endif
-  //FUNCTION_EXIT();
+  #endif
 
-  InterlockedIncrement(&xi->rx_outstanding);
   //FUNCTION_EXIT();
   return TRUE;
 }
@@ -717,6 +778,39 @@ XenNet_ReturnPacket(NDIS_HANDLE adapter_context, PNDIS_PACKET packet) {
   PNDIS_BUFFER buffer;
   shared_buffer_t *page_buf = PACKET_FIRST_PB(packet);
 
+  #ifdef RX_STATS
+  {
+  UINT packet_length;
+  UINT buffer_count;
+
+  NdisQueryPacket(packet, NULL, &buffer_count, NULL, &packet_length);
+  if (packet_length <= 64) {
+    InterlockedIncrement((PLONG)&x_0_64_packet_returned);
+  } else if (packet_length <= 128) {
+    InterlockedIncrement((PLONG)&x_65_128_packet_returned);
+  } else if (packet_length <= 256) {
+    InterlockedIncrement((PLONG)&x_129_256_packet_returned);
+  } else if (packet_length <= 512) {
+    InterlockedIncrement((PLONG)&x_257_512_packet_returned);
+  } else if (packet_length <= 1024) {
+    InterlockedIncrement((PLONG)&x_513_1024_packet_returned);
+  } else if (packet_length <= 1516) {
+    InterlockedIncrement((PLONG)&x_1025_1514_packet_returned);
+  } else {
+    InterlockedIncrement((PLONG)&x_1515_65535_packet_returned);
+  }
+  if (buffer_count == 1) {
+    InterlockedIncrement((PLONG)&x_1_frag_packet_returned);
+  } else if (buffer_count == 2) {
+    InterlockedIncrement((PLONG)&x_2_frag_packet_returned);
+  } else if (buffer_count == 3) {
+    InterlockedIncrement((PLONG)&x_3_frag_packet_returned);
+  } else {
+    InterlockedIncrement((PLONG)&x_4_or_more_frag_packet_returned);
+  }
+  }
+#endif
+
   //FUNCTION_ENTER();
   NdisUnchainBufferAtFront(packet, &buffer);
   
@@ -737,6 +831,7 @@ XenNet_ReturnPacket(NDIS_HANDLE adapter_context, PNDIS_PACKET packet) {
   }
 
   NdisFreePacket(packet);
+  InterlockedIncrement((PLONG)&x_packet_freed);
   InterlockedDecrement(&xi->rx_outstanding);
   if (!xi->rx_outstanding && xi->device_state != DEVICE_STATE_ACTIVE)
     KeSetEvent(&xi->rx_idle_event, IO_NO_INCREMENT, FALSE);
@@ -896,8 +991,8 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
       memcpy(&page_buf->rsp, RING_GET_RESPONSE(&xi->rx_ring, cons), max(sizeof(struct netif_rx_response), sizeof(struct netif_extra_info)));
       if (!extra_info_flag) {
         if (page_buf->rsp.status <= 0 || page_buf->rsp.offset + page_buf->rsp.status > PAGE_SIZE) {
-          KdPrint((__DRIVER_NAME "     Error: rsp offset %d, size %d\n",
-            page_buf->rsp.offset, page_buf->rsp.status));
+          FUNCTION_MSG("Error: rsp offset %d, size %d\n",
+            page_buf->rsp.offset, page_buf->rsp.status);
           XN_ASSERT(!extra_info_flag);
           put_pb_on_freelist(xi, page_buf);
           continue;
@@ -949,7 +1044,7 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
   /* anything past last_buf belongs to an incomplete packet... */
   if (last_buf && last_buf->next)
   {
-    KdPrint((__DRIVER_NAME "     Partial receive\n"));
+    FUNCTION_MSG("Partial receive\n");
     xi->rx_partial_buf = last_buf->next;
     xi->rx_partial_more_data_flag = more_data_flag;
     xi->rx_partial_extra_info_flag = extra_info_flag;
@@ -961,7 +1056,7 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
   if (packet_count >= MAXIMUM_PACKETS_PER_INTERRUPT || packet_data >= MAXIMUM_DATA_PER_INTERRUPT)
   {
     /* fire again immediately */
-    KdPrint((__DRIVER_NAME "     Dpc Duration Exceeded\n"));
+    FUNCTION_MSG("Dpc Duration Exceeded\n");
     /* we want the Dpc on the end of the queue. By definition we are already on the right CPU so we know the Dpc queue will be run immediately */
 //    KeSetImportanceDpc(&xi->rxtx_dpc, MediumImportance);
     KeInsertQueueDpc(&xi->rxtx_dpc, NULL, NULL);
@@ -999,12 +1094,12 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
           // TODO - put this assertion somewhere XN_ASSERT(header_len + pi->mss <= PAGE_SIZE); // this limits MTU to PAGE_SIZE - XN_HEADER_LEN
           break;
         default:
-          KdPrint((__DRIVER_NAME "     Unknown GSO type (%d) detected\n", ei->u.gso.type));
+          FUNCTION_MSG("Unknown GSO type (%d) detected\n", ei->u.gso.type);
           break;
         }
         break;
       default:
-        KdPrint((__DRIVER_NAME "     Unknown extra info type (%d) detected\n", ei->type));
+        FUNCTION_MSG("Unknown extra info type (%d) detected\n", ei->type);
         break;
       }
       put_pb_on_freelist(xi, page_buf);
@@ -1058,6 +1153,8 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
   while (rc.first_packet) {
     PNDIS_PACKET packet;
     NDIS_STATUS status;
+    UINT packet_length;
+    UINT buffer_count;
 
     packet = rc.first_packet;
     XN_ASSERT(PACKET_FIRST_PB(packet));
@@ -1071,6 +1168,31 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
       }
       last_header_only_packet = packet;
       PACKET_NEXT_PACKET(packet) = NULL;
+    }
+    NdisQueryPacket(packet, NULL, &buffer_count, NULL, &packet_length);
+    if (packet_length <= 64) {
+      InterlockedIncrement((PLONG)&x_0_64_packet_indicated);
+    } else if (packet_length <= 128) {
+      InterlockedIncrement((PLONG)&x_65_128_packet_indicated);
+    } else if (packet_length <= 256) {
+      InterlockedIncrement((PLONG)&x_129_256_packet_indicated);
+    } else if (packet_length <= 512) {
+      InterlockedIncrement((PLONG)&x_257_512_packet_indicated);
+    } else if (packet_length <= 1024) {
+      InterlockedIncrement((PLONG)&x_513_1024_packet_indicated);
+    } else if (packet_length <= 1516) {
+      InterlockedIncrement((PLONG)&x_1025_1514_packet_indicated);
+    } else {
+      InterlockedIncrement((PLONG)&x_1515_65535_packet_indicated);
+    }
+    if (buffer_count == 1) {
+      InterlockedIncrement((PLONG)&x_1_frag_packet_indicated);
+    } else if (buffer_count == 2) {
+      InterlockedIncrement((PLONG)&x_2_frag_packet_indicated);
+    } else if (buffer_count == 3) {
+      InterlockedIncrement((PLONG)&x_3_frag_packet_indicated);
+    } else {
+      InterlockedIncrement((PLONG)&x_4_or_more_frag_packet_indicated);
     }
     packets[packet_count++] = packet;
     /* if we indicate a packet with NDIS_STATUS_RESOURCES then any following packet can't be NDIS_STATUS_SUCCESS */
@@ -1087,6 +1209,16 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
     first_header_only_packet = PACKET_NEXT_PACKET(packet);
     XenNet_ReturnPacket(xi, packet);
   }
+{
+  LARGE_INTEGER current_time;
+  KeAcquireSpinLockAtDpcLevel(&xi->rx_lock);
+  KeQuerySystemTime(&current_time);
+  if (current_time.QuadPart >= x_next_print_time.QuadPart) {
+    dump_x_stats();
+    x_next_print_time.QuadPart = current_time.QuadPart + 10 * 1000 * 1000 * 10; /* 10 seconds */
+  }
+  KeReleaseSpinLockFromDpcLevel(&xi->rx_lock);
+}
   #else
   if (rc.first_nbl) {
     NdisMIndicateReceiveNetBufferLists(xi->adapter_handle, rc.first_nbl,
@@ -1145,7 +1277,7 @@ XenNet_RxInit(xennet_info_t *xi) {
   KeInitializeEvent(&xi->rx_idle_event, SynchronizationEvent, FALSE);
   xi->rxpi = ExAllocatePoolWithTagPriority(NonPagedPool, sizeof(packet_info_t) * NdisSystemProcessorCount(), XENNET_POOL_TAG, NormalPoolPriority);
   if (!xi->rxpi) {
-    KdPrint(("ExAllocatePoolWithTagPriority failed\n"));
+    FUNCTION_MSG("ExAllocatePoolWithTagPriority failed\n");
     return FALSE;
   }
   NdisZeroMemory(xi->rxpi, sizeof(packet_info_t) * NdisSystemProcessorCount());
@@ -1174,7 +1306,7 @@ XenNet_RxInit(xennet_info_t *xi) {
   #if NTDDI_VERSION < NTDDI_VISTA
   NdisAllocatePacketPool(&status, &xi->rx_packet_pool, NET_RX_RING_SIZE * 4, PROTOCOL_RESERVED_SIZE_IN_PACKET);
   if (status != NDIS_STATUS_SUCCESS) {
-    KdPrint(("NdisAllocatePacketPool failed with 0x%x\n", status));
+    FUNCTION_MSG("NdisAllocatePacketPool failed with 0x%x\n", status);
     return FALSE;
   }
   #else
@@ -1189,7 +1321,7 @@ XenNet_RxInit(xennet_info_t *xi) {
   
   xi->rx_nbl_pool = NdisAllocateNetBufferListPool(xi->adapter_handle, &nbl_pool_parameters);
   if (!xi->rx_nbl_pool) {
-    KdPrint(("NdisAllocateNetBufferListPool failed\n"));
+    FUNCTION_MSG("NdisAllocateNetBufferListPool failed\n");
     return FALSE;
   }
 
@@ -1200,7 +1332,7 @@ XenNet_RxInit(xennet_info_t *xi) {
   nb_pool_parameters.DataSize = 0; /* the buffers come from the ring */
   xi->rx_packet_pool = NdisAllocateNetBufferPool(xi->adapter_handle, &nb_pool_parameters);
   if (!xi->rx_packet_pool) {
-    KdPrint(("NdisAllocateNetBufferPool (rx_packet_pool) failed\n"));
+    FUNCTION_MSG("NdisAllocateNetBufferPool (rx_packet_pool) failed\n");
     return FALSE;
   }
   #endif

@@ -119,9 +119,9 @@ XenNet_Initialize(NDIS_HANDLE adapter_handle, NDIS_HANDLE driver_context, PNDIS_
 
   #if NTDDI_VERSION < NTDDI_VISTA
   #endif
-  xi->rx_target     = RX_DFL_MIN_TARGET;
-  xi->rx_min_target = RX_DFL_MIN_TARGET;
-  xi->rx_max_target = RX_MAX_TARGET;
+  xi->rx_target     = RX_DEFAULT_TARGET;
+  //xi->rx_min_target = RX_DFL_MIN_TARGET;
+  //xi->rx_max_target = RX_MAX_TARGET;
   
   xi->multicast_list_size = 0;
   xi->current_lookahead = MIN_LOOKAHEAD_LENGTH;
