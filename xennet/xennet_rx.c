@@ -20,56 +20,6 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 #include "xennet.h"
 
-#define RX_STATS
-
-#ifdef RX_STATS
-static ULONG x_packet_allocated = 0;
-static ULONG x_packet_freed = 0;
-static ULONG x_packet_resources = 0;
-
-static ULONG x_0_64_packet_indicated = 0;
-static ULONG x_65_128_packet_indicated = 0;
-static ULONG x_129_256_packet_indicated = 0;
-static ULONG x_257_512_packet_indicated = 0;
-static ULONG x_513_1024_packet_indicated = 0;
-static ULONG x_1025_1514_packet_indicated = 0;
-static ULONG x_1515_65535_packet_indicated = 0;
-static ULONG x_0_64_packet_returned = 0;
-static ULONG x_65_128_packet_returned = 0;
-static ULONG x_129_256_packet_returned = 0;
-static ULONG x_257_512_packet_returned = 0;
-static ULONG x_513_1024_packet_returned = 0;
-static ULONG x_1025_1514_packet_returned = 0;
-static ULONG x_1515_65535_packet_returned = 0;
-
-static ULONG x_1_frag_packet_indicated = 0;
-static ULONG x_2_frag_packet_indicated = 0;
-static ULONG x_3_frag_packet_indicated = 0;
-static ULONG x_4_or_more_frag_packet_indicated = 0;
-static ULONG x_1_frag_packet_returned = 0;
-static ULONG x_2_frag_packet_returned = 0;
-static ULONG x_3_frag_packet_returned = 0;
-static ULONG x_4_or_more_frag_packet_returned = 0;
-
-static LARGE_INTEGER x_next_print_time = {0};
-
-static VOID
-dump_x_stats() {
-  FUNCTION_MSG("x_pkt_allocated (outstanding, resources) = %d (%d, %d)\n", x_packet_allocated, x_packet_allocated - x_packet_freed, x_packet_resources);
-  FUNCTION_MSG("x_0_64_pkt_indicated (outstanding)       = %d (%d)\n", x_0_64_packet_indicated, x_0_64_packet_indicated - x_0_64_packet_returned);
-  FUNCTION_MSG("x_65_128_pkt_indicated (outstanding)     = %d (%d)\n", x_65_128_packet_indicated, x_65_128_packet_indicated - x_65_128_packet_returned);
-  FUNCTION_MSG("x_129_256_pkt_indicated (outstanding)    = %d (%d)\n", x_129_256_packet_indicated, x_129_256_packet_indicated - x_129_256_packet_returned);
-  FUNCTION_MSG("x_257_512_pkt_indicated (outstanding)    = %d (%d)\n", x_257_512_packet_indicated, x_257_512_packet_indicated - x_257_512_packet_returned);
-  FUNCTION_MSG("x_513_1024_pkt_indicated (outstanding)   = %d (%d)\n", x_513_1024_packet_indicated, x_513_1024_packet_indicated - x_513_1024_packet_returned);
-  FUNCTION_MSG("x_1025_1514_pkt_indicated (outstanding)  = %d (%d)\n", x_1025_1514_packet_indicated, x_1025_1514_packet_indicated - x_1025_1514_packet_returned);
-  FUNCTION_MSG("x_1515_65535_pkt_indicated (outstanding) = %d (%d)\n", x_1515_65535_packet_indicated, x_1515_65535_packet_indicated - x_1515_65535_packet_returned);
-  FUNCTION_MSG("x_1_frag_pkt_indicated (outstanding)     = %d (%d)\n", x_1_frag_packet_indicated, x_1_frag_packet_indicated - x_1_frag_packet_returned);
-  FUNCTION_MSG("x_2_frag_pkt_indicated (outstanding)     = %d (%d)\n", x_2_frag_packet_indicated, x_2_frag_packet_indicated - x_2_frag_packet_returned);
-  FUNCTION_MSG("x_3_frag_pkt_indicated (outstanding)     = %d (%d)\n", x_3_frag_packet_indicated, x_3_frag_packet_indicated - x_3_frag_packet_returned);
-  FUNCTION_MSG("x_4+_frag_pkt_indicated (outstanding)    = %d (%d)\n", x_4_or_more_frag_packet_indicated, x_4_or_more_frag_packet_indicated - x_4_or_more_frag_packet_returned);
-}
-#endif
-
 static __inline shared_buffer_t *
 get_pb_from_freelist(struct xennet_info *xi)
 {
@@ -406,7 +356,6 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
     return FALSE;
   }
   
-  InterlockedIncrement((PLONG)&x_packet_allocated);
   NdisZeroMemory(packet->MiniportReservedEx, sizeof(packet->MiniportReservedEx));
   NDIS_SET_PACKET_HEADER_SIZE(packet, XN_HDR_SIZE);
   #else  
@@ -451,7 +400,6 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
       #if NTDDI_VERSION < NTDDI_VISTA
       NdisUnchainBufferAtFront(packet, &curr_mdl);
       NdisFreePacket(packet);
-      InterlockedIncrement((PLONG)&x_packet_freed);
       #else
       NdisFreeNetBufferList(nbl);
       NdisFreeNetBuffer(packet);
@@ -661,7 +609,6 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
   #if NTDDI_VERSION < NTDDI_VISTA
   if (outstanding > RX_PACKET_HIGH_WATER_MARK || !xi->rx_pb_free) {
     NDIS_SET_PACKET_STATUS(packet, NDIS_STATUS_RESOURCES);
-    InterlockedIncrement((PLONG)&x_packet_resources);
   } else {
     NDIS_SET_PACKET_STATUS(packet, NDIS_STATUS_SUCCESS);
   }
@@ -778,39 +725,6 @@ XenNet_ReturnPacket(NDIS_HANDLE adapter_context, PNDIS_PACKET packet) {
   PNDIS_BUFFER buffer;
   shared_buffer_t *page_buf = PACKET_FIRST_PB(packet);
 
-  #ifdef RX_STATS
-  {
-  UINT packet_length;
-  UINT buffer_count;
-
-  NdisQueryPacket(packet, NULL, &buffer_count, NULL, &packet_length);
-  if (packet_length <= 64) {
-    InterlockedIncrement((PLONG)&x_0_64_packet_returned);
-  } else if (packet_length <= 128) {
-    InterlockedIncrement((PLONG)&x_65_128_packet_returned);
-  } else if (packet_length <= 256) {
-    InterlockedIncrement((PLONG)&x_129_256_packet_returned);
-  } else if (packet_length <= 512) {
-    InterlockedIncrement((PLONG)&x_257_512_packet_returned);
-  } else if (packet_length <= 1024) {
-    InterlockedIncrement((PLONG)&x_513_1024_packet_returned);
-  } else if (packet_length <= 1516) {
-    InterlockedIncrement((PLONG)&x_1025_1514_packet_returned);
-  } else {
-    InterlockedIncrement((PLONG)&x_1515_65535_packet_returned);
-  }
-  if (buffer_count == 1) {
-    InterlockedIncrement((PLONG)&x_1_frag_packet_returned);
-  } else if (buffer_count == 2) {
-    InterlockedIncrement((PLONG)&x_2_frag_packet_returned);
-  } else if (buffer_count == 3) {
-    InterlockedIncrement((PLONG)&x_3_frag_packet_returned);
-  } else {
-    InterlockedIncrement((PLONG)&x_4_or_more_frag_packet_returned);
-  }
-  }
-#endif
-
   //FUNCTION_ENTER();
   NdisUnchainBufferAtFront(packet, &buffer);
   
@@ -831,7 +745,6 @@ XenNet_ReturnPacket(NDIS_HANDLE adapter_context, PNDIS_PACKET packet) {
   }
 
   NdisFreePacket(packet);
-  InterlockedIncrement((PLONG)&x_packet_freed);
   InterlockedDecrement(&xi->rx_outstanding);
   if (!xi->rx_outstanding && xi->device_state != DEVICE_STATE_ACTIVE)
     KeSetEvent(&xi->rx_idle_event, IO_NO_INCREMENT, FALSE);
@@ -1153,8 +1066,6 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
   while (rc.first_packet) {
     PNDIS_PACKET packet;
     NDIS_STATUS status;
-    UINT packet_length;
-    UINT buffer_count;
 
     packet = rc.first_packet;
     XN_ASSERT(PACKET_FIRST_PB(packet));
@@ -1168,31 +1079,6 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
       }
       last_header_only_packet = packet;
       PACKET_NEXT_PACKET(packet) = NULL;
-    }
-    NdisQueryPacket(packet, NULL, &buffer_count, NULL, &packet_length);
-    if (packet_length <= 64) {
-      InterlockedIncrement((PLONG)&x_0_64_packet_indicated);
-    } else if (packet_length <= 128) {
-      InterlockedIncrement((PLONG)&x_65_128_packet_indicated);
-    } else if (packet_length <= 256) {
-      InterlockedIncrement((PLONG)&x_129_256_packet_indicated);
-    } else if (packet_length <= 512) {
-      InterlockedIncrement((PLONG)&x_257_512_packet_indicated);
-    } else if (packet_length <= 1024) {
-      InterlockedIncrement((PLONG)&x_513_1024_packet_indicated);
-    } else if (packet_length <= 1516) {
-      InterlockedIncrement((PLONG)&x_1025_1514_packet_indicated);
-    } else {
-      InterlockedIncrement((PLONG)&x_1515_65535_packet_indicated);
-    }
-    if (buffer_count == 1) {
-      InterlockedIncrement((PLONG)&x_1_frag_packet_indicated);
-    } else if (buffer_count == 2) {
-      InterlockedIncrement((PLONG)&x_2_frag_packet_indicated);
-    } else if (buffer_count == 3) {
-      InterlockedIncrement((PLONG)&x_3_frag_packet_indicated);
-    } else {
-      InterlockedIncrement((PLONG)&x_4_or_more_frag_packet_indicated);
     }
     packets[packet_count++] = packet;
     /* if we indicate a packet with NDIS_STATUS_RESOURCES then any following packet can't be NDIS_STATUS_SUCCESS */
@@ -1209,16 +1095,6 @@ XenNet_RxBufferCheck(struct xennet_info *xi)
     first_header_only_packet = PACKET_NEXT_PACKET(packet);
     XenNet_ReturnPacket(xi, packet);
   }
-{
-  LARGE_INTEGER current_time;
-  KeAcquireSpinLockAtDpcLevel(&xi->rx_lock);
-  KeQuerySystemTime(&current_time);
-  if (current_time.QuadPart >= x_next_print_time.QuadPart) {
-    dump_x_stats();
-    x_next_print_time.QuadPart = current_time.QuadPart + 10 * 1000 * 1000 * 10; /* 10 seconds */
-  }
-  KeReleaseSpinLockFromDpcLevel(&xi->rx_lock);
-}
   #else
   if (rc.first_nbl) {
     NdisMIndicateReceiveNetBufferLists(xi->adapter_handle, rc.first_nbl,
