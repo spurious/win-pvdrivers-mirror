@@ -186,7 +186,9 @@ SET_NET_ULONG(PVOID ptr, ULONG data) {
 #define MAX_PKT_HEADER_LENGTH (MAX_ETH_HEADER_LENGTH + MAX_IP4_HEADER_LENGTH + MAX_TCP_HEADER_LENGTH)
 
 #define MIN_LOOKAHEAD_LENGTH (MAX_IP4_HEADER_LENGTH + MAX_TCP_HEADER_LENGTH)
-#define MAX_LOOKAHEAD_LENGTH PAGE_SIZE
+//#define MAX_LOOKAHEAD_LENGTH PAGE_SIZE
+/* optimise the size of header buffers */
+#define MAX_LOOKAHEAD_LENGTH (512 - sizeof(shared_buffer_t) - MAX_ETH_HEADER_LENGTH)
 
 #define LINUX_MAX_SG_ELEMENTS 18
 
@@ -361,6 +363,7 @@ struct xennet_info
 
   BOOLEAN config_csum_rx_check;
   BOOLEAN config_csum_rx_dont_fix;
+  BOOLEAN config_rx_coalesce;
 
   #if NTDDI_VERSION < NTDDI_VISTA
   NDIS_TASK_TCP_IP_CHECKSUM setting_csum;

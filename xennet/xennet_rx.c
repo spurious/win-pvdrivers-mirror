@@ -376,10 +376,11 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
   }
   #endif
 
-  if (!pi->first_mdl->Next && !pi->split_required) {
+  if ((!pi->first_mdl->Next || (xi->config_rx_coalesce && pi->total_length <= PAGE_SIZE)) && !pi->split_required) {
     /* a single buffer <= MTU */
     header_buf = NULL;
-    XenNet_BuildHeader(pi, pi->first_mdl_virtual, pi->first_mdl_length);
+    /* get all the packet into the header */
+    XenNet_BuildHeader(pi, pi->first_mdl_virtual, PAGE_SIZE);
     #if NTDDI_VERSION < NTDDI_VISTA
     NdisChainBufferAtBack(packet, pi->first_mdl);
     PACKET_FIRST_PB(packet) = pi->first_pb;
@@ -629,7 +630,7 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
 static VOID
 XenNet_MakePackets(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi)
 {
-  UCHAR psh;
+  UCHAR tcp_flags;
   shared_buffer_t *page_buf;
 
   XenNet_ParsePacketHeader(pi, NULL, XN_HDR_SIZE + xi->current_lookahead);
@@ -686,8 +687,14 @@ XenNet_MakePackets(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi)
   pi->tcp_remaining = pi->tcp_length;
 
   /* we can make certain assumptions here as the following code is only for tcp4 */
-  psh = pi->header[XN_HDR_SIZE + pi->ip4_header_length + 13] & 8;
+  tcp_flags = pi->header[XN_HDR_SIZE + pi->ip4_header_length + 13];
+  /* clear all tcp flags except ack except for the last packet */
+  pi->header[XN_HDR_SIZE + pi->ip4_header_length + 13] &= 0x10;
   while (pi->tcp_remaining) {
+    if (pi->tcp_remaining <= pi->mss) {
+      /* restore tcp flags for the last packet */
+      pi->header[XN_HDR_SIZE + pi->ip4_header_length + 13] = tcp_flags;
+    }
     if (!XenNet_MakePacket(xi, rc, pi)) {
       FUNCTION_MSG("Failed to make packet\n");
       #if NTDDI_VERSION < NTDDI_VISTA
@@ -696,12 +703,6 @@ XenNet_MakePackets(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi)
       xi->stats.ifInDiscards++;
       #endif
       break; /* we are out of memory - just drop the packets */
-    }
-    if (psh) {
-      if (pi->tcp_remaining)
-        pi->header[XN_HDR_SIZE + pi->ip4_header_length + 13] &= ~8;
-      else
-        pi->header[XN_HDR_SIZE + pi->ip4_header_length + 13] |= 8;
     }
   }
 done:

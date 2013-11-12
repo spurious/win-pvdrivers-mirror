@@ -74,6 +74,12 @@ HKR, Ndi\Params\ScatterGather, type, , "enum"
 HKR, Ndi\Params\ScatterGather\enum, 0, , "Disabled"
 HKR, Ndi\Params\ScatterGather\enum, 1, , "Enabled"
 
+HKR, Ndi\Params\RxCoalesce, ParamDesc, , "Rx Coalesce"
+HKR, Ndi\Params\RxCoalesce, default, , "1"
+HKR, Ndi\Params\RxCoalesce, type, , "enum"
+HKR, Ndi\Params\RxCoalesce\enum, 0, , "Disabled"
+HKR, Ndi\Params\RxCoalesce\enum, 1, , "Enabled"
+
 HKR, Ndi\Params\NetworkAddress, ParamDesc, , "Locally Administered Address"
 HKR, Ndi\Params\NetworkAddress, Type, , "edit"
 HKR, Ndi\Params\NetworkAddress, LimitText, , "12"

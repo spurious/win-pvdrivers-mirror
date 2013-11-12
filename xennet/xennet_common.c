@@ -41,8 +41,10 @@ XenNet_BuildHeader(packet_info_t *pi, PUCHAR header, ULONG new_header_size)
   }
 
   if (header == pi->first_mdl_virtual) {
+    ASSERT(new_header_size <= PAGE_SIZE);
     /* still working in the first buffer */
     if (new_header_size <= pi->first_mdl_length) {
+      /* Trivially expand header_length */
       pi->header_length = new_header_size;
       if (pi->header_length == pi->first_mdl_length) {
         #if NTDDI_VERSION < NTDDI_VISTA
@@ -56,16 +58,12 @@ XenNet_BuildHeader(packet_info_t *pi, PUCHAR header, ULONG new_header_size)
       } else {
         pi->curr_mdl_offset = (USHORT)new_header_size;
       }
-      //FUNCTION_EXIT();
-      return TRUE;
-    } else {
-      memcpy(pi->header_data, header, pi->header_length);
-      header = pi->header = pi->header_data;
     }
+  } else {
+    ASSERT(new_header_size <= MAX_LOOKAHEAD_LENGTH + MAX_ETH_HEADER_LENGTH);
   }
   
   bytes_remaining = new_header_size - pi->header_length;
-  // TODO: if there are only a small number of bytes left in the current buffer then increase to consume that too... it would have to be no more than the size of header+mss though
 
   while (bytes_remaining && pi->curr_mdl) {
     ULONG copy_size;

@@ -180,7 +180,7 @@ XenNet_Initialize(NDIS_HANDLE adapter_handle, NDIS_HANDLE driver_context, PNDIS_
 
   NdisInitUnicodeString(&config_param_name, L"ScatterGather");
   NdisReadConfiguration(&status, &config_param, config_handle, &config_param_name, NdisParameterInteger);
-  if (!NT_SUCCESS(status))
+  if (!NT_SUCCESS(status)) 
   {
     FUNCTION_MSG("Could not read ScatterGather value (%08x)\n", status);
     xi->frontend_sg_supported = TRUE;
@@ -191,6 +191,16 @@ XenNet_Initialize(NDIS_HANDLE adapter_handle, NDIS_HANDLE driver_context, PNDIS_
   if (xi->frontend_sg_supported && ndis_os_minor_version < 1) {
     FUNCTION_MSG("No support for SG with NDIS 6.0, disabled\n");
     xi->frontend_sg_supported = FALSE;
+  }
+
+  NdisInitUnicodeString(&config_param_name, L"RxCoalesce");
+  NdisReadConfiguration(&status, &config_param, config_handle, &config_param_name, NdisParameterInteger);
+  if (!NT_SUCCESS(status)) {
+    FUNCTION_MSG("Could not read RxCoalesce value (%08x)\n", status);
+    xi->config_rx_coalesce = TRUE;
+  } else {
+    FUNCTION_MSG("RxCoalesce = %d\n", config_param->ParameterData.IntegerData);
+    xi->config_rx_coalesce = (BOOLEAN)!!config_param->ParameterData.IntegerData;
   }
   
   NdisInitUnicodeString(&config_param_name, L"LargeSendOffload");
