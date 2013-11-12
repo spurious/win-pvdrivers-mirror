@@ -86,9 +86,11 @@ XenVbd_StopRing(PXENVBD_DEVICE_DATA xvdd, BOOLEAN suspend) {
     if (!WdfRequestSend(request, xvfd->wdf_target, &send_options)) {
       FUNCTION_MSG("Request was _NOT_ sent\n");
     }
+    #if DBG
     status = WdfRequestGetStatus(request);
     FUNCTION_MSG("Request Status = %08x\n", status);
     FUNCTION_MSG("SRB Status = %08x\n", srb.SrbStatus);
+    #endif
 
     WdfObjectDelete(request);
   }
@@ -141,9 +143,11 @@ XenVbd_StartRing(PXENVBD_DEVICE_DATA xvdd, BOOLEAN suspend) {
     if (!WdfRequestSend(request, xvfd->wdf_target, &send_options)) {
       FUNCTION_MSG("Request was _NOT_ sent\n");
     }
+    #if DBG
     status = WdfRequestGetStatus(request);
     FUNCTION_MSG("Request Status = %08x\n", status);
     FUNCTION_MSG("SRB Status = %08x\n", srb.SrbStatus);
+    #endif
 
     WdfObjectDelete(request);
   }
