@@ -215,11 +215,18 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER packet) {
   }
 
   if (ndis_lso) {    
+    ULONG csum;
     flags |= NETTXF_csum_blank | NETTXF_data_validated; /* these may be implied but not specified when lso is used*/
     if (pi.tcp_length >= mss) {
       flags |= NETTXF_extra_info;
       xen_gso = TRUE;
     }
+    /* Adjust pseudoheader checksum to be what Linux expects (remove the tcp_length) */
+    csum = ~RtlUshortByteSwap(*(PUSHORT)&pi.header[XN_HDR_SIZE + pi.ip4_header_length + 16]);
+    csum -= (pi.ip4_length - pi.ip4_header_length);
+    while (csum & 0xFFFF0000)
+      csum = (csum & 0xFFFF) + (csum >> 16);
+    *(PUSHORT)&pi.header[XN_HDR_SIZE + pi.ip4_header_length + 16] = ~RtlUshortByteSwap((USHORT)csum);
   }
 /*
 * See io/netif.h. Must put (A) 1st request, then (B) optional extra_info, then
