@@ -275,10 +275,11 @@ XnFreeMem(XN_HANDLE handle, PVOID Ptr) {
   ExFreePoolWithTag(Ptr, XENPCI_POOL_TAG);
 }
 
+PVOID
+XnGetHypercallStubs();
 
-//VOID
-//XnDumpModeHookDebugPrint();
-
+VOID
+XnSetHypercallStubs(PVOID _hypercall_stubs);
 
 NTSTATUS
 XnDebugPrint(PCHAR format, ...);
