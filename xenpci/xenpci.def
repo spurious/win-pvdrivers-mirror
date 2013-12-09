@@ -28,6 +28,9 @@ EXPORTS
  XnReadInt64
  XnWriteInt64
 
+ XnGetHypercallStubs
+ XnSetHypercallStubs
+
  XnDebugPrint
  XnPrintDump
 
