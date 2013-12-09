@@ -54,8 +54,9 @@ XenVbd_Connect(PXENVBD_DEVICE_DATA xvdd, BOOLEAN suspend) {
 
   while (xvdd->backend_state != XenbusStateInitialising &&
     xvdd->backend_state != XenbusStateInitWait &&
-    xvdd->backend_state != XenbusStateInitialised) {
-    FUNCTION_MSG("waiting for XenbusStateInitXxx, backend_state = %d\n", xvdd->backend_state);
+    xvdd->backend_state != XenbusStateInitialised &&
+    xvdd->backend_state != XenbusStateConnected) {
+    FUNCTION_MSG("waiting for XenbusStateInitXxx/XenbusStateConnected, backend_state = %d\n", xvdd->backend_state);
     KeWaitForSingleObject(&xvdd->backend_event, Executive, KernelMode, FALSE, NULL);
   }
   XnGetValue(xvdd->handle, XN_VALUE_TYPE_QEMU_HIDE_FLAGS, &qemu_hide_flags_value);
