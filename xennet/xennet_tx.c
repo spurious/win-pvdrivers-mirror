@@ -45,6 +45,7 @@ XenNet_PutCbOnRing(struct xennet_info *xi, PVOID coalesce_buf, ULONG length, gra
   struct netif_tx_request *tx;
   tx = RING_GET_REQUEST(&xi->tx_ring, xi->tx_ring.req_prod_pvt);
   xi->tx_ring.req_prod_pvt++;
+  XN_ASSERT(xi->tx_ring_free);
   xi->tx_ring_free--;
   tx->id = get_id_from_freelist(xi);
   XN_ASSERT(xi->tx_shadows[tx->id].gref == INVALID_GRANT_REF);
@@ -257,6 +258,7 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER packet) {
     ei = (struct netif_extra_info *)RING_GET_REQUEST(&xi->tx_ring, xi->tx_ring.req_prod_pvt);
     //KdPrint((__DRIVER_NAME "     pos = %d\n", xi->tx_ring.req_prod_pvt));
     xi->tx_ring.req_prod_pvt++;
+    XN_ASSERT(xi->tx_ring_free);
     xi->tx_ring_free--;
     ei->type = XEN_NETIF_EXTRA_TYPE_GSO;
     ei->flags = 0;
@@ -328,14 +330,15 @@ XenNet_HWSendPacket(struct xennet_info *xi, PNET_BUFFER packet) {
       }
       txN = RING_GET_REQUEST(&xi->tx_ring, xi->tx_ring.req_prod_pvt);
       xi->tx_ring.req_prod_pvt++;
+      XN_ASSERT(xi->tx_ring_free);
       xi->tx_ring_free--;
       txN->id = get_id_from_freelist(xi);
+      XN_ASSERT(xi->tx_shadows[txN->id].gref == INVALID_GRANT_REF);
       XN_ASSERT(!xi->tx_shadows[txN->id].cb);
       offset = MmGetMdlByteOffset(pi.curr_mdl) + pi.curr_mdl_offset;
       pfn = MmGetMdlPfnArray(pi.curr_mdl)[offset >> PAGE_SHIFT];
       txN->offset = (USHORT)offset & (PAGE_SIZE - 1);
       txN->gref = XnGrantAccess(xi->handle, (ULONG)pfn, FALSE, gref, (ULONG)'XNTX');
-      XN_ASSERT(xi->tx_shadows[txN->id].gref == INVALID_GRANT_REF);
       xi->tx_shadows[txN->id].gref = txN->gref;
       //ASSERT(sg->Elements[sg_element].Length > sg_offset);
       txN->size = (USHORT)length;
@@ -521,6 +524,8 @@ XenNet_TxBufferGC(struct xennet_info *xi, BOOLEAN dont_set_event) {
         shadow->packet = NULL;
         tx_packets++;
       }
+      XN_ASSERT(xi->tx_shadows[txrsp->id].gref == INVALID_GRANT_REF);
+      XN_ASSERT(!xi->tx_shadows[txrsp->id].cb);
       put_id_on_freelist(xi, txrsp->id);
     }
 

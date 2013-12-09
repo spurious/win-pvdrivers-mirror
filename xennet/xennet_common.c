@@ -41,7 +41,7 @@ XenNet_BuildHeader(packet_info_t *pi, PUCHAR header, ULONG new_header_size)
   }
 
   if (header == pi->first_mdl_virtual) {
-    ASSERT(new_header_size <= PAGE_SIZE);
+    XN_ASSERT(new_header_size <= PAGE_SIZE);
     /* still working in the first buffer */
     if (new_header_size <= pi->first_mdl_length) {
       /* Trivially expand header_length */
@@ -59,8 +59,6 @@ XenNet_BuildHeader(packet_info_t *pi, PUCHAR header, ULONG new_header_size)
         pi->curr_mdl_offset = (USHORT)new_header_size;
       }
     }
-  } else {
-    ASSERT(new_header_size <= MAX_LOOKAHEAD_LENGTH + MAX_ETH_HEADER_LENGTH);
   }
   
   bytes_remaining = new_header_size - pi->header_length;
