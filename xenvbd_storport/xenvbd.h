@@ -100,6 +100,7 @@ struct {
   BOOLEAN aligned_buffer_in_use;
   STOR_POWER_ACTION power_action;
   STOR_DEVICE_POWER_STATE power_state;
+  PVOID hypercall_stubs;
   ULONG aligned_buffer_size;
   PVOID aligned_buffer;
 /*  

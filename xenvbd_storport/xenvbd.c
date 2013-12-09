@@ -141,6 +141,9 @@ XenVbd_VirtualHwStorFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID Bu
   FUNCTION_MSG("aligned_buffer_data = %p\n", xvdd->aligned_buffer_data);
   FUNCTION_MSG("aligned_buffer = %p\n", xvdd->aligned_buffer);
 
+  /* save hypercall_stubs for crash dump */
+  xvdd->hypercall_stubs = XnGetHypercallStubs();
+
   ConfigInfo->MaximumTransferLength = 4 * 1024 * 1024; //BLKIF_MAX_SEGMENTS_PER_REQUEST * PAGE_SIZE;
   ConfigInfo->NumberOfPhysicalBreaks = ConfigInfo->MaximumTransferLength >> PAGE_SHIFT; //BLKIF_MAX_SEGMENTS_PER_REQUEST - 1;
   FUNCTION_MSG("ConfigInfo->MaximumTransferLength = %d\n", ConfigInfo->MaximumTransferLength);
@@ -193,6 +196,8 @@ XenVbd_HwStorFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInform
   if (xvdd->device_state != DEVICE_STATE_ACTIVE) {
     return SP_RETURN_ERROR;
   }
+  /* restore hypercall_stubs into dump_xenpci */
+  XnSetHypercallStubs(xvdd->hypercall_stubs);
   /* make sure original xvdd is set to DISCONNECTED or resume will not work */
   ((PXENVBD_DEVICE_DATA)ConfigInfo->Reserved)->device_state = DEVICE_STATE_DISCONNECTED;
   InitializeListHead(&xvdd->srb_list);
