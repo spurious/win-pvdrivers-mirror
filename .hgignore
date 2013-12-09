@@ -26,3 +26,4 @@ SIGN_CONFIG.BAT$
 _objects.mac$
 upload.*
 TAG_HG
+.*\.session
