@@ -141,6 +141,9 @@ XenVbd_VirtualHwStorFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID Bu
   FUNCTION_MSG("aligned_buffer_data = %p\n", xvdd->aligned_buffer_data);
   FUNCTION_MSG("aligned_buffer = %p\n", xvdd->aligned_buffer);
 
+  StorPortInitializeDpc(DeviceExtension, &xvdd->dpc, XenVbd_HandleEventDpc);
+  xvdd->grant_tag = (ULONG)'XVBD';
+
   /* save hypercall_stubs for crash dump */
   xvdd->hypercall_stubs = XnGetHypercallStubs();
 
@@ -205,6 +208,7 @@ XenVbd_HwStorFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInform
   /* align the buffer to PAGE_SIZE */
   xvdd->aligned_buffer = (PVOID)((ULONG_PTR)((PUCHAR)xvdd->aligned_buffer_data + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1));
   xvdd->aligned_buffer_size = DUMP_MODE_UNALIGNED_PAGES * PAGE_SIZE;
+  xvdd->grant_tag = (ULONG)'DUMP';
   FUNCTION_MSG("aligned_buffer_data = %p\n", xvdd->aligned_buffer_data);
   FUNCTION_MSG("aligned_buffer = %p\n", xvdd->aligned_buffer);
 
@@ -258,12 +262,6 @@ XenVbd_HwStorInitialize(PVOID DeviceExtension)
     put_shadow_on_freelist(xvdd, &xvdd->shadows[i]);
   }
 
-  if (!dump_mode) {
-    StorPortInitializeDpc(DeviceExtension, &xvdd->dpc, XenVbd_HandleEventDpc);
-  } else {
-    xvdd->grant_tag = (ULONG)'DUMP';
-  }
-  
   FUNCTION_EXIT();
 
   return TRUE;
