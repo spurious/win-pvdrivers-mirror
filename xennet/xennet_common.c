@@ -366,7 +366,8 @@ XenNet_Connect(PVOID context, BOOLEAN suspend) {
     xi->device_state = DEVICE_STATE_INACTIVE;
     /* continue with setup so all the flags and capabilities are correct */
   }
-
+  /* explicitly set the frontend state as it will still be 'closed' if we are restarting the adapter */
+  status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "state", XenbusStateInitialising);
   if (xi->device_state != DEVICE_STATE_INACTIVE) {
     for (i = 0; i <= 5 && xi->backend_state != XenbusStateInitialising && xi->backend_state != XenbusStateInitWait && xi->backend_state != XenbusStateInitialised; i++) {
       FUNCTION_MSG("Waiting for XenbusStateInitXxx\n");
@@ -417,13 +418,21 @@ XenNet_Connect(PVOID context, BOOLEAN suspend) {
     status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "feature-sg", (int)xi->frontend_sg_supported);
     status = XnWriteInt32(xi->handle, XN_BASE_FRONTEND, "feature-gso-tcpv4", !!xi->frontend_gso_value);
   }
+  
+  /* backend always supports checksum offload */
+  xi->backend_csum_supported = TRUE;
+  
   status = XnReadInt32(xi->handle, XN_BASE_BACKEND, "feature-sg", &tmp_ulong);
-  if (tmp_ulong) {
+  if (NT_SUCCESS(status) && tmp_ulong) {
     xi->backend_sg_supported = TRUE;
+  } else {
+    xi->backend_sg_supported = FALSE;
   }
   status = XnReadInt32(xi->handle, XN_BASE_BACKEND, "feature-gso-tcpv4", &tmp_ulong);
-  if (tmp_ulong) {
+  if (NT_SUCCESS(status) && tmp_ulong) {
     xi->backend_gso_value = xi->frontend_gso_value;
+  } else {
+    xi->backend_gso_value = FALSE;
   }
 
   status = XnReadString(xi->handle, XN_BASE_BACKEND, "mac", &tmp_string);
