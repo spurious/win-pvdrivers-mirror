@@ -33,6 +33,7 @@ get_id_from_freelist(struct xennet_info *xi)
 static VOID
 put_id_on_freelist(struct xennet_info *xi, USHORT id)
 {
+  XN_ASSERT(id >= 0 && id < NET_TX_RING_SIZE);
   xi->tx_id_list[xi->tx_id_free] = id;
   xi->tx_id_free++;
 }
