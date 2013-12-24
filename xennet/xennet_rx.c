@@ -510,7 +510,7 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
     #if NTDDI_VERSION < NTDDI_VISTA
     csum_info = (PNDIS_TCP_IP_CHECKSUM_PACKET_INFO)&NDIS_PER_PACKET_INFO_FROM_PACKET(
       packet, TcpIpChecksumPacketInfo);
-    XN_ASSERT(csum_info->Value == 0);
+    csum_info->Value = 0;
     if (pi->csum_blank || pi->data_validated || pi->split_required) {
       BOOLEAN checksum_offload = FALSE;
       /* we know this is IPv4, and we know Linux always validates the IPv4 checksum for us */
