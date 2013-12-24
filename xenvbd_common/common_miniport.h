@@ -929,10 +929,10 @@ XenVbd_ProcessSrbList(PXENVBD_DEVICE_DATA xvdd) {
         case 2:
           data_buffer[13] = 1; /* 1024 byte hardware sectors */
           break;
-        case 3:
+        case 4:
           data_buffer[13] = 2; /* 2048 byte hardware sectors */
           break;
-        case 4:
+        case 8:
           data_buffer[13] = 3; /* 4096 byte hardware sectors */
           break;
         default:
