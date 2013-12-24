@@ -66,6 +66,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 struct {
   PXENVBD_DEVICE_DATA xvdd;
   ULONG outstanding;
+  PVOID hypercall_stubs;
   PSCSI_REQUEST_BLOCK stop_srb;
   /* this is the size of the buffer to allocate at the end of DeviceExtenstion. It includes an extra PAGE_SIZE-1 bytes to assure that we can always align to PAGE_SIZE */
   #define UNALIGNED_BUFFER_DATA_SIZE ((BLKIF_MAX_SEGMENTS_PER_REQUEST + 1) * PAGE_SIZE - 1)

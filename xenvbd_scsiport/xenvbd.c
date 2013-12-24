@@ -85,7 +85,7 @@ XenVbd_NotificationBusChangeDetected(PXENVBD_DEVICE_DATA xvdd, UCHAR PathId) {
 #include "..\xenvbd_common\common_miniport.h"
 
 
-/* called in non-dump mode */
+/* called in non-dump & dump mode */
 static ULONG
 XenVbd_HwScsiFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInformation, PCHAR ArgumentString, PPORT_CONFIGURATION_INFORMATION ConfigInfo, PBOOLEAN Again) {
   PXENVBD_SCSIPORT_DATA xvsd = (PXENVBD_SCSIPORT_DATA)DeviceExtension;
@@ -119,6 +119,8 @@ XenVbd_HwScsiFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInform
     xvsd->xvdd = xvdd;
     xvdd->xvsd = xvsd;
     xvdd->aligned_buffer = (PVOID)((ULONG_PTR)((PUCHAR)xvsd->aligned_buffer_data + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1));
+    /* save hypercall_stubs for crash dump */
+    xvsd->hypercall_stubs = XnGetHypercallStubs();
   } else {
     /* make a copy of xvdd and use that copy */
     xvdd = (PXENVBD_DEVICE_DATA)xvsd->aligned_buffer_data;
@@ -128,6 +130,8 @@ XenVbd_HwScsiFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInform
     xvsd->xvdd = xvdd;
     xvdd->xvsd = xvsd;
     xvdd->aligned_buffer = (PVOID)((ULONG_PTR)((PUCHAR)xvsd->aligned_buffer_data + sizeof(XENVBD_DEVICE_DATA) + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1));
+    /* restore hypercall_stubs into dump_xenpci */
+    XnSetHypercallStubs(xvsd->hypercall_stubs);
     if (xvsd->xvdd->device_state != DEVICE_STATE_ACTIVE) {
       /* if we are not connected to the ring when we start dump mode then there is nothing we can do */
       FUNCTION_MSG("Cannot connect backend in dump mode - state = %d\n", xvsd->xvdd->device_state);
