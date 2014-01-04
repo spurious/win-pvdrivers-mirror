@@ -12,7 +12,6 @@ SET SYMFILES=%SYMFILES% xenvbd_filter\%BUILDDIR%\xenvbd_filter*.sys xenvbd_filte
 
 IF %DDK_TARGET_OS%==Win2K GOTO symfiles_done
 
-SET SYMFILES=%SYMFILES% xenscsi\%BUILDDIR%\xen*.sys xenscsi\%BUILDDIR%\xen*.pdb
 SET SYMFILES=%SYMFILES% xenusb\%BUILDDIR%\xen*.sys xenusb\%BUILDDIR%\xen*.pdb
 
 IF %DDK_TARGET_OS%==WinXP GOTO symfiles_done

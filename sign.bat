@@ -16,8 +16,8 @@ ECHO BUILDDIR=%BUILDDIR%
 ECHO SIGN_OS=%SIGN_OS%
 
 for /F %%x in ('DIR /B %BASEDIR%\redist\wdf\%_BUILDARCH%\WdfCoInstaller?????.dll') do set WDFFILENAME=%%x
-xcopy /D %BASEDIR%\redist\wdf\%_BUILDARCH%\%WDFFILENAME% xenpci\%BUILDDIR%
-xcopy /D %BASEDIR%\redist\wdf\%_BUILDARCH%\%WDFFILENAME% xenusb\%BUILDDIR%
+xcopy /I /D %BASEDIR%\redist\wdf\%_BUILDARCH%\%WDFFILENAME% xenpci\%BUILDDIR%\
+xcopy /I /D %BASEDIR%\redist\wdf\%_BUILDARCH%\%WDFFILENAME% xenusb\%BUILDDIR%\
 
 %SIGNTOOL% sign /v %CERT_CROSS_CERT_FLAG% /f %CERT_FILENAME% %CERT_PASSWORD_FLAG% /t http://timestamp.verisign.com/scripts/timestamp.dll xenpci\%BUILDDIR%\xenpci.sys
 %DDK_PATH%\bin\selfsign\inf2cat /driver:xenpci\%BUILDDIR% /os:%SIGN_OS%
@@ -34,10 +34,6 @@ COPY xenvbd_filter\%BUILDDIR%\xenvbdfilter.sys xenvbd_scsiport\%BUILDDIR%
 %SIGNTOOL% sign /v %CERT_CROSS_CERT_FLAG% /f %CERT_FILENAME% %CERT_PASSWORD_FLAG% /t http://timestamp.verisign.com/scripts/timestamp.dll xennet\%BUILDDIR%\xennet.cat
 
 IF %DDK_TARGET_OS%==Win2K GOTO DONT_SIGN
-
-%SIGNTOOL% sign /v %CERT_CROSS_CERT_FLAG% /f %CERT_FILENAME% %CERT_PASSWORD_FLAG% /t http://timestamp.verisign.com/scripts/timestamp.dll xenscsi\%BUILDDIR%\xenscsi.sys
-%DDK_PATH%\bin\selfsign\inf2cat /driver:xenscsi\%BUILDDIR% /os:%SIGN_OS%
-%SIGNTOOL% sign /v %CERT_CROSS_CERT_FLAG% /f %CERT_FILENAME% %CERT_PASSWORD_FLAG% /t http://timestamp.verisign.com/scripts/timestamp.dll xenscsi\%BUILDDIR%\xenscsi.cat
 
 %SIGNTOOL% sign /v %CERT_CROSS_CERT_FLAG% /f %CERT_FILENAME% %CERT_PASSWORD_FLAG% /t http://timestamp.verisign.com/scripts/timestamp.dll xenusb\%BUILDDIR%\xenusb.sys
 %DDK_PATH%\bin\selfsign\inf2cat /driver:xenusb\%BUILDDIR% /os:%SIGN_OS%
