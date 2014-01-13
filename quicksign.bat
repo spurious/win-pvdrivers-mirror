@@ -30,8 +30,8 @@ SET CERT_PASSWORD_FLAG=
 IF DEFINED CERT_PASSWORD SET CERT_PASSWORD_FLAG=/p %CERT_PASSWORD%
 %SIGNTOOL% sign /v %CERT_CROSS_CERT_FLAG% /f %CERT_FILENAME% %CERT_PASSWORD_FLAG% /t http://timestamp.verisign.com/scripts/timstamp.dll xenpci\%BUILDDIR%\xenpci.sys
 %SIGNTOOL% sign /v %CERT_CROSS_CERT_FLAG% /f %CERT_FILENAME% %CERT_PASSWORD_FLAG% /t http://timestamp.verisign.com/scripts/timstamp.dll xenvbd_scsiport\%BUILDDIR%\xenvbd.sys
-%SIGNTOOL% sign /v %CERT_CROSS_CERT_FLAG% /f %CERT_FILENAME% %CERT_PASSWORD_FLAG% /t http://timestamp.verisign.com/scripts/timstamp.dll xenvbd_filter\%BUILDDIR%\xenvbd_filter.sys
+%SIGNTOOL% sign /v %CERT_CROSS_CERT_FLAG% /f %CERT_FILENAME% %CERT_PASSWORD_FLAG% /t http://timestamp.verisign.com/scripts/timstamp.dll xenvbd_filter\%BUILDDIR%\xenvbdfilter.sys
 %SIGNTOOL% sign /v %CERT_CROSS_CERT_FLAG% /f %CERT_FILENAME% %CERT_PASSWORD_FLAG% /t http://timestamp.verisign.com/scripts/timstamp.dll xenvbd_storport\%BUILDDIR%\xenvbd.sys
 %SIGNTOOL% sign /v %CERT_CROSS_CERT_FLAG% /f %CERT_FILENAME% %CERT_PASSWORD_FLAG% /t http://timestamp.verisign.com/scripts/timstamp.dll xennet\%BUILDDIR%\xennet.sys
 %SIGNTOOL% sign /v %CERT_CROSS_CERT_FLAG% /f %CERT_FILENAME% %CERT_PASSWORD_FLAG% /t http://timestamp.verisign.com/scripts/timstamp.dll xenusb\%BUILDDIR%\xenusb.sys
-%SIGNTOOL% sign /v %CERT_CROSS_CERT_FLAG% /f %CERT_FILENAME% %CERT_PASSWORD_FLAG% /t http://timestamp.verisign.com/scripts/timstamp.dll xencache\%BUILDDIR%\xencache.sys
+REM %SIGNTOOL% sign /v %CERT_CROSS_CERT_FLAG% /f %CERT_FILENAME% %CERT_PASSWORD_FLAG% /t http://timestamp.verisign.com/scripts/timstamp.dll xencache\%BUILDDIR%\xencache.sys
