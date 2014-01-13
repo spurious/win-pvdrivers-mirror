@@ -185,6 +185,12 @@ static ULONG
 XenVbd_HwStorFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInformation, PCHAR ArgumentString, PPORT_CONFIGURATION_INFORMATION ConfigInfo, PBOOLEAN Again)
 {
   PXENVBD_DEVICE_DATA xvdd = (PXENVBD_DEVICE_DATA)DeviceExtension;
+#if defined(NTDDI_WIN8) && (NTDDI_VERSION >= NTDDI_WIN8)
+  PVOID dump_data = ConfigInfo->MiniportDumpData;
+#else 
+  PVOID dump_data = ConfigInfo->Reserved;
+#endif 
+  
 
   UNREFERENCED_PARAMETER(HwContext);
   UNREFERENCED_PARAMETER(BusInformation);
@@ -195,14 +201,14 @@ XenVbd_HwStorFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInform
   FUNCTION_MSG("xvdd = %p\n", xvdd);
   FUNCTION_MSG("ArgumentString = %s\n", ArgumentString);
 
-  memcpy(xvdd, ConfigInfo->Reserved, FIELD_OFFSET(XENVBD_DEVICE_DATA, aligned_buffer_data));
+  memcpy(xvdd, dump_data, FIELD_OFFSET(XENVBD_DEVICE_DATA, aligned_buffer_data));
   if (xvdd->device_state != DEVICE_STATE_ACTIVE) {
     return SP_RETURN_ERROR;
   }
   /* restore hypercall_stubs into dump_xenpci */
   XnSetHypercallStubs(xvdd->hypercall_stubs);
   /* make sure original xvdd is set to DISCONNECTED or resume will not work */
-  ((PXENVBD_DEVICE_DATA)ConfigInfo->Reserved)->device_state = DEVICE_STATE_DISCONNECTED;
+  ((PXENVBD_DEVICE_DATA)dump_data)->device_state = DEVICE_STATE_DISCONNECTED;
   InitializeListHead(&xvdd->srb_list);
   xvdd->aligned_buffer_in_use = FALSE;
   /* align the buffer to PAGE_SIZE */
@@ -227,7 +233,6 @@ XenVbd_HwStorFindAdapter(PVOID DeviceExtension, PVOID HwContext, PVOID BusInform
   ConfigInfo->InitiatorBusId[0] = 1;
   ConfigInfo->MaximumNumberOfLogicalUnits = 1;
   ConfigInfo->MaximumNumberOfTargets = 2;
-  ConfigInfo->VirtualDevice = FALSE;
   if (ConfigInfo->Dma64BitAddresses == SCSI_DMA64_SYSTEM_SUPPORTED) {
     ConfigInfo->Dma64BitAddresses = SCSI_DMA64_MINIPORT_SUPPORTED;
     FUNCTION_MSG("Dma64BitAddresses supported\n");
