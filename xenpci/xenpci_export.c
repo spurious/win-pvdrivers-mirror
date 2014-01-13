@@ -402,8 +402,6 @@ XnGetValue(XN_HANDLE handle, ULONG value_type, PVOID value) {
   }
 }
 
-//externPVOID hypercall_stubs = NULL;
-
 PVOID
 XnGetHypercallStubs() {
   return hypercall_stubs;

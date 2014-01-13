@@ -377,7 +377,9 @@ XenPci_EvtDeviceAdd_XenHide(WDFDRIVER driver, PWDFDEVICE_INIT device_init)
 static NTSTATUS
 XenPci_EvtDeviceAdd(WDFDRIVER driver, PWDFDEVICE_INIT device_init)
 {
-  if (XenPci_IdSuffixMatches(device_init, L"VEN_5853&DEV_0001")) {
+  if (!hypercall_stubs) {
+    return STATUS_SUCCESS;
+  } else if (XenPci_IdSuffixMatches(device_init, L"VEN_5853&DEV_0001")) {
     FUNCTION_MSG("Xen PCI device found - must be fdo\n");
     return XenPci_EvtDeviceAdd_XenPci(driver, device_init);
   } else if (WdfCollectionGetCount(qemu_hide_devices) > 0) {
@@ -551,19 +553,9 @@ XenPci_FixLoadOrder()
   return;
 }
 
-VOID
-XenPci_EvtDriverUnload(WDFDRIVER driver)
-{
-  UNREFERENCED_PARAMETER(driver);
-  
-//  #if DBG
-//  XenPci_UnHookDbgPrint();
-//  #endif  
-}
-
 #if (NTDDI_VERSION >= NTDDI_WS03SP1)  
 /* this isn't freed on shutdown... perhaps it should be */
-static PUCHAR dump_header;
+static PUCHAR dump_header = NULL;
 static ULONG dump_header_size;
 static ULONG dump_header_refreshed_flag = FALSE;
 static KBUGCHECK_REASON_CALLBACK_RECORD callback_record;
@@ -589,6 +581,87 @@ XenPci_DebugHeaderDumpIoCallback(
   }
 }
 #endif
+
+#define XEN_SIGNATURE_LOWER 0x40000000
+#define XEN_SIGNATURE_UPPER 0x4000FFFF
+
+USHORT xen_version_major = (USHORT)-1;
+USHORT xen_version_minor = (USHORT)-1;
+PVOID hypercall_stubs = NULL;
+
+static VOID
+XenPCI_GetHypercallStubs() {
+  ULONG base;
+  DWORD32 cpuid_output[4];
+  char xensig[13];
+  ULONG i;
+  ULONG pages;
+  ULONG msr;
+
+  if (hypercall_stubs) {
+    FUNCTION_MSG("hypercall_stubs already set\n");
+    return;
+  }
+
+  for (base = XEN_SIGNATURE_LOWER; base < XEN_SIGNATURE_UPPER; base += 0x100) {
+    __cpuid(cpuid_output, base);
+    *(ULONG*)(xensig + 0) = cpuid_output[1];
+    *(ULONG*)(xensig + 4) = cpuid_output[2];
+    *(ULONG*)(xensig + 8) = cpuid_output[3];
+    xensig[12] = '\0';
+    FUNCTION_MSG("base = 0x%08x, Xen Signature = %s, EAX = 0x%08x\n", base, xensig, cpuid_output[0]);
+    if (!strncmp("XenVMMXenVMM", xensig, 12) && ((cpuid_output[0] - base) >= 2))
+      break;
+  }
+  if (base >= XEN_SIGNATURE_UPPER) {
+    FUNCTION_MSG("Cannot find Xen signature\n");
+    return;
+  }
+
+  __cpuid(cpuid_output, base + 1);
+  xen_version_major = (USHORT)(cpuid_output[0] >> 16);
+  xen_version_minor = (USHORT)(cpuid_output[0] & 0xFFFF);
+  FUNCTION_MSG("Xen Version %d.%d\n", xen_version_major, xen_version_minor);
+
+  __cpuid(cpuid_output, base + 2);
+  pages = cpuid_output[0];
+  msr = cpuid_output[1];
+
+  hypercall_stubs = ExAllocatePoolWithTag(NonPagedPool, pages * PAGE_SIZE, XENPCI_POOL_TAG);
+  FUNCTION_MSG("Hypercall area at %p\n", hypercall_stubs);
+
+  if (!hypercall_stubs)
+    return;
+  for (i = 0; i < pages; i++) {
+    ULONGLONG pfn;
+    pfn = (MmGetPhysicalAddress((PUCHAR)hypercall_stubs + i * PAGE_SIZE).QuadPart >> PAGE_SHIFT);
+    __writemsr(msr, (pfn << PAGE_SHIFT) + i);
+  }
+}
+
+static VOID
+XenPCI_FreeHypercallStubs() {
+  if (hypercall_stubs) {
+    ExFreePoolWithTag(hypercall_stubs, XENPCI_POOL_TAG);
+  }
+  hypercall_stubs = NULL;
+}
+
+VOID
+XenPci_EvtDriverUnload(WDFDRIVER driver) {
+  UNREFERENCED_PARAMETER(driver);
+
+  FUNCTION_ENTER();
+  
+#if (NTDDI_VERSION >= NTDDI_WS03SP1)
+  KeDeregisterBugCheckReasonCallback(&callback_record);
+  if (dump_header) {
+    MmFreeContiguousMemory(dump_header);
+  }
+#endif
+  FUNCTION_EXIT();
+}
+
   
 NTSTATUS
 DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
@@ -619,127 +692,128 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 
   FUNCTION_MSG(__DRIVER_NAME " " VER_FILEVERSION_STR "\n");
 
+  XenPCI_GetHypercallStubs();
+  
 #if (NTDDI_VERSION >= NTDDI_WS03SP1)
-  status = KeInitializeCrashDumpHeader(DUMP_TYPE_FULL, 0, NULL, 0, &dump_header_size);
-  /* try and allocate contiguous memory as low as possible */
-  dump_header = NULL;
-  dump_header_mem_max.QuadPart = 0xFFFFF;
-  while (!dump_header && dump_header_mem_max.QuadPart != 0xFFFFFFFFFFFFFFFF) {
-    dump_header = MmAllocateContiguousMemory(DUMP_HEADER_PREFIX_SIZE + dump_header_size + DUMP_HEADER_SUFFIX_SIZE, dump_header_mem_max);
-    if (dump_header) {
-      FUNCTION_MSG("Allocated crash dump header < 0x%016I64x\n", dump_header_mem_max.QuadPart);
-      break;
+  if (hypercall_stubs) {
+    status = KeInitializeCrashDumpHeader(DUMP_TYPE_FULL, 0, NULL, 0, &dump_header_size);
+    /* try and allocate contiguous memory as low as possible */
+    dump_header_mem_max.QuadPart = 0xFFFFF;
+    while (!dump_header && dump_header_mem_max.QuadPart != 0xFFFFFFFFFFFFFFFF) {
+      dump_header = MmAllocateContiguousMemory(DUMP_HEADER_PREFIX_SIZE + dump_header_size + DUMP_HEADER_SUFFIX_SIZE, dump_header_mem_max);
+      if (dump_header) {
+        FUNCTION_MSG("Allocated crash dump header < 0x%016I64x\n", dump_header_mem_max.QuadPart);
+        break;
+      }
+      dump_header_mem_max.QuadPart = (dump_header_mem_max.QuadPart << 4) | 0xF;
     }
-    dump_header_mem_max.QuadPart = (dump_header_mem_max.QuadPart << 4) | 0xF;
-  }
-  if (dump_header) {
-    status = KeInitializeCrashDumpHeader(DUMP_TYPE_FULL, 0, dump_header + DUMP_HEADER_PREFIX_SIZE, dump_header_size, &dump_header_size);
-    FUNCTION_MSG("KeInitializeCrashDumpHeader status = %08x, size = %d\n", status, dump_header_size);
-    memcpy(dump_header + 0, "XENXEN", 6); /* magic number */
-    *(PUSHORT)(dump_header + 6) = (USHORT)(INT_PTR)dump_header & (PAGE_SIZE - 1); /* store offset too as additional verification */
-    memcpy(dump_header + DUMP_HEADER_PREFIX_SIZE + dump_header_size, "XENXEN", 6);
-    *(PUSHORT)(dump_header + DUMP_HEADER_PREFIX_SIZE + dump_header_size + 6) = (USHORT)(INT_PTR)dump_header & (PAGE_SIZE - 1); /* store offset too as additional verification */
-    KeInitializeCallbackRecord(&callback_record);
-    KeRegisterBugCheckReasonCallback(&callback_record, XenPci_DebugHeaderDumpIoCallback, KbCallbackDumpIo, (PUCHAR)"XenPci_DebugHeaderDumpIoCallback");
-  } else {
-    FUNCTION_MSG("Failed to allocate memory for crash dump header\n");
+    if (dump_header) {
+      status = KeInitializeCrashDumpHeader(DUMP_TYPE_FULL, 0, dump_header + DUMP_HEADER_PREFIX_SIZE, dump_header_size, &dump_header_size);
+      FUNCTION_MSG("KeInitializeCrashDumpHeader status = %08x, size = %d\n", status, dump_header_size);
+      memcpy(dump_header + 0, "XENXEN", 6); /* magic number */
+      *(PUSHORT)(dump_header + 6) = (USHORT)(INT_PTR)dump_header & (PAGE_SIZE - 1); /* store offset too as additional verification */
+      memcpy(dump_header + DUMP_HEADER_PREFIX_SIZE + dump_header_size, "XENXEN", 6);
+      *(PUSHORT)(dump_header + DUMP_HEADER_PREFIX_SIZE + dump_header_size + 6) = (USHORT)(INT_PTR)dump_header & (PAGE_SIZE - 1); /* store offset too as additional verification */
+      KeInitializeCallbackRecord(&callback_record);
+      KeRegisterBugCheckReasonCallback(&callback_record, XenPci_DebugHeaderDumpIoCallback, KbCallbackDumpIo, (PUCHAR)"XenPci_DebugHeaderDumpIoCallback");
+    } else {
+      FUNCTION_MSG("Failed to allocate memory for crash dump header\n");
+    }
   }
 #endif
-
   WDF_DRIVER_CONFIG_INIT(&config, XenPci_EvtDeviceAdd);
   config.EvtDriverUnload = XenPci_EvtDriverUnload;
   status = WdfDriverCreate(DriverObject, RegistryPath, WDF_NO_OBJECT_ATTRIBUTES, &config, &driver);
   if (!NT_SUCCESS(status)) {
     FUNCTION_MSG("WdfDriverCreate failed with status 0x%x\n", status);
     FUNCTION_EXIT();
-    //#if DBG
-    //XenPci_UnHookDbgPrint();
-    //#endif
     return status;
   }
-  WDF_OBJECT_ATTRIBUTES_INIT(&parent_attributes);
-  parent_attributes.ParentObject = driver;
-  
-  status = WdfDriverOpenParametersRegistryKey(driver, KEY_QUERY_VALUE, &parent_attributes, &param_key);
-  if (!NT_SUCCESS(status)) {
-    FUNCTION_MSG("Error opening parameters key %08x\n", status);
-    goto error;
-  }
-
-  status = AuxKlibInitialize();
-  if(!NT_SUCCESS(status)) {
-    FUNCTION_MSG("AuxKlibInitialize failed %08x\n", status);
-    goto error;
-  }
-
-  XenPci_FixLoadOrder();
-
-  RtlInitUnicodeString(&system_start_options, L"failed to read");
-  status = WdfRegistryOpenKey(NULL, &control_key_name, GENERIC_READ, &parent_attributes, &control_key);
-  if (NT_SUCCESS(status)) {
-    status = WdfStringCreate(NULL, &parent_attributes, &wdf_system_start_options);
-    status = WdfRegistryQueryString(control_key, &system_start_options_name, wdf_system_start_options);
-    if (NT_SUCCESS(status))
-      WdfStringGetUnicodeString(wdf_system_start_options, &system_start_options);
-  }
-  WdfRegistryClose(control_key);
-
-  FUNCTION_MSG("SystemStartOptions = %wZ\n", &system_start_options);
-  
-  always_patch = 0;
-  WdfRegistryQueryULong(param_key, &txt_always_patch_name, &always_patch);
-  if (always_patch || (system_start_options.Buffer && wcsstr(system_start_options.Buffer, L"PATCHTPR"))) {
-    DECLARE_CONST_UNICODE_STRING(verifier_key_name, L"\\Registry\\Machine\\System\\CurrentControlSet\\Control\\Session Manager\\Memory Management");
-    WDFKEY memory_key;
-    ULONG verifier_value;
+  if (hypercall_stubs) {
+    WDF_OBJECT_ATTRIBUTES_INIT(&parent_attributes);
+    parent_attributes.ParentObject = driver;
     
-    FUNCTION_MSG("PATCHTPR found\n");
+    status = WdfDriverOpenParametersRegistryKey(driver, KEY_QUERY_VALUE, &parent_attributes, &param_key);
+    if (!NT_SUCCESS(status)) {
+      FUNCTION_MSG("Error opening parameters key %08x\n", status);
+      goto error;
+    }
+
+    status = AuxKlibInitialize();
+    if(!NT_SUCCESS(status)) {
+      FUNCTION_MSG("AuxKlibInitialize failed %08x\n", status);
+      goto error;
+    }
+
+    XenPci_FixLoadOrder();
+
+    RtlInitUnicodeString(&system_start_options, L"failed to read");
+    status = WdfRegistryOpenKey(NULL, &control_key_name, GENERIC_READ, &parent_attributes, &control_key);
+    if (NT_SUCCESS(status)) {
+      status = WdfStringCreate(NULL, &parent_attributes, &wdf_system_start_options);
+      status = WdfRegistryQueryString(control_key, &system_start_options_name, wdf_system_start_options);
+      if (NT_SUCCESS(status))
+        WdfStringGetUnicodeString(wdf_system_start_options, &system_start_options);
+    }
+    WdfRegistryClose(control_key);
+
+    FUNCTION_MSG("SystemStartOptions = %wZ\n", &system_start_options);
     
-    tpr_patch_requested = TRUE;
-    status = WdfRegistryOpenKey(NULL, &verifier_key_name, KEY_READ, &parent_attributes, &memory_key);
-    if (NT_SUCCESS(status))
-    {
-      DECLARE_CONST_UNICODE_STRING(verifier_value_name, L"VerifyDriverLevel");
-      status = WdfRegistryQueryULong(memory_key, &verifier_value_name, &verifier_value);
-      if (NT_SUCCESS(status) && verifier_value != 0)
+    always_patch = 0;
+    WdfRegistryQueryULong(param_key, &txt_always_patch_name, &always_patch);
+    if (always_patch || (system_start_options.Buffer && wcsstr(system_start_options.Buffer, L"PATCHTPR"))) {
+      DECLARE_CONST_UNICODE_STRING(verifier_key_name, L"\\Registry\\Machine\\System\\CurrentControlSet\\Control\\Session Manager\\Memory Management");
+      WDFKEY memory_key;
+      ULONG verifier_value;
+      
+      FUNCTION_MSG("PATCHTPR found\n");
+      
+      tpr_patch_requested = TRUE;
+      status = WdfRegistryOpenKey(NULL, &verifier_key_name, KEY_READ, &parent_attributes, &memory_key);
+      if (NT_SUCCESS(status))
       {
-        FUNCTION_MSG("Verifier active - not patching\n");
-        tpr_patch_requested = FALSE;
+        DECLARE_CONST_UNICODE_STRING(verifier_value_name, L"VerifyDriverLevel");
+        status = WdfRegistryQueryULong(memory_key, &verifier_value_name, &verifier_value);
+        if (NT_SUCCESS(status) && verifier_value != 0)
+        {
+          FUNCTION_MSG("Verifier active - not patching\n");
+          tpr_patch_requested = FALSE;
+        }
+        WdfRegistryClose(memory_key);
       }
-      WdfRegistryClose(memory_key);
     }
-  }
 
-  WdfCollectionCreate(&parent_attributes, &qemu_hide_devices);
-  WdfRegistryQueryULong(param_key, &txt_always_hide_name, &always_hide);
-  conf_info = IoGetConfigurationInformation();      
-  if (always_hide || ((conf_info == NULL || conf_info->DiskCount == 0)
-      && !(system_start_options.Buffer && wcsstr(system_start_options.Buffer, L"NOGPLPV"))
-      && !*InitSafeBootMode)) {
-    if (!(system_start_options.Buffer && wcsstr(system_start_options.Buffer, L"GPLPVUSEFILTERHIDE")) && XenPci_CheckHideQemuDevices()) {
-      DECLARE_CONST_UNICODE_STRING(qemu_hide_flags_name, L"qemu_hide_flags");
-      DECLARE_CONST_UNICODE_STRING(txt_qemu_hide_flags_name, L"txt_qemu_hide_flags");
-      WDFCOLLECTION qemu_hide_flags;
-      ULONG i;
+    WdfCollectionCreate(&parent_attributes, &qemu_hide_devices);
+    WdfRegistryQueryULong(param_key, &txt_always_hide_name, &always_hide);
+    conf_info = IoGetConfigurationInformation();      
+    if (always_hide || ((conf_info == NULL || conf_info->DiskCount == 0)
+        && !(system_start_options.Buffer && wcsstr(system_start_options.Buffer, L"NOGPLPV"))
+        && !*InitSafeBootMode)) {
+      if (!(system_start_options.Buffer && wcsstr(system_start_options.Buffer, L"GPLPVUSEFILTERHIDE")) && XenPci_CheckHideQemuDevices()) {
+        DECLARE_CONST_UNICODE_STRING(qemu_hide_flags_name, L"qemu_hide_flags");
+        DECLARE_CONST_UNICODE_STRING(txt_qemu_hide_flags_name, L"txt_qemu_hide_flags");
+        WDFCOLLECTION qemu_hide_flags;
+        ULONG i;
 
-      WdfCollectionCreate(&parent_attributes, &qemu_hide_flags);
-      WdfRegistryQueryMultiString(param_key, &qemu_hide_flags_name, &parent_attributes, qemu_hide_flags);
-      WdfRegistryQueryMultiString(param_key, &txt_qemu_hide_flags_name, &parent_attributes, qemu_hide_flags);
-      for (i = 0; i < WdfCollectionGetCount(qemu_hide_flags); i++) {
-        ULONG value;
-        WDFSTRING wdf_string = WdfCollectionGetItem(qemu_hide_flags, i);
-        UNICODE_STRING unicode_string;
-        WdfStringGetUnicodeString(wdf_string, &unicode_string);
-        status = RtlUnicodeStringToInteger(&unicode_string, 0, &value);
-        qemu_hide_flags_value |= value;
+        WdfCollectionCreate(&parent_attributes, &qemu_hide_flags);
+        WdfRegistryQueryMultiString(param_key, &qemu_hide_flags_name, &parent_attributes, qemu_hide_flags);
+        WdfRegistryQueryMultiString(param_key, &txt_qemu_hide_flags_name, &parent_attributes, qemu_hide_flags);
+        for (i = 0; i < WdfCollectionGetCount(qemu_hide_flags); i++) {
+          ULONG value;
+          WDFSTRING wdf_string = WdfCollectionGetItem(qemu_hide_flags, i);
+          UNICODE_STRING unicode_string;
+          WdfStringGetUnicodeString(wdf_string, &unicode_string);
+          status = RtlUnicodeStringToInteger(&unicode_string, 0, &value);
+          qemu_hide_flags_value |= value;
+        }
+        WdfObjectDelete(qemu_hide_flags);
+        XenPci_HideQemuDevices();
+      } else {
+        WdfRegistryQueryMultiString(param_key, &hide_devices_name, &parent_attributes, qemu_hide_devices);      
       }
-      WdfObjectDelete(qemu_hide_flags);
-      XenPci_HideQemuDevices();
-    } else {
-      WdfRegistryQueryMultiString(param_key, &hide_devices_name, &parent_attributes, qemu_hide_devices);      
     }
+    WdfRegistryClose(param_key);
   }
-  WdfRegistryClose(param_key);
   FUNCTION_EXIT();
   return STATUS_SUCCESS;
 
