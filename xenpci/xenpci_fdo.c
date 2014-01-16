@@ -157,15 +157,7 @@ XenPci_SysrqHandler(char *path, PVOID context) {
 
   FUNCTION_MSG("SysRq Value = %s\n", value);
 
-  if (value != NULL && strlen(value) != 0) {
-    letter = *value;
-    res = XenBus_Write(xpdd, XBT_NIL, SYSRQ_PATH, "");
-    if (res) {
-      FUNCTION_MSG("Error writing sysrq path\n");
-      XenPci_FreeMem(res);
-      return;
-    }
-  } else {
+  if (!value || !strlen(value)) {
     letter = 0;
   }
 
