@@ -22,10 +22,6 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <aux_klib.h>
 #include <stdlib.h>
 
-#define SYSRQ_PATH "control/sysrq"
-#define SHUTDOWN_PATH "control/shutdown"
-#define BALLOON_PATH "memory/target"
-
 #pragma warning(disable : 4200) // zero-sized array
 
 PMDL balloon_mdl_head = NULL;
@@ -557,8 +553,8 @@ XenPci_FixLoadOrder()
 /* this isn't freed on shutdown... perhaps it should be */
 static PUCHAR dump_header = NULL;
 static ULONG dump_header_size;
-static ULONG dump_header_refreshed_flag = FALSE;
 static KBUGCHECK_REASON_CALLBACK_RECORD callback_record;
+static ULONG64 dump_current_offset = 0;
 #define DUMP_HEADER_PREFIX_SIZE 8
 #define DUMP_HEADER_SUFFIX_SIZE 8
 
@@ -569,15 +565,22 @@ XenPci_DebugHeaderDumpIoCallback(
   PKBUGCHECK_REASON_CALLBACK_RECORD record,
   PVOID reason_specific_data,
   ULONG reason_specific_data_length) {
-  UNREFERENCED_PARAMETER(reason);
   UNREFERENCED_PARAMETER(record);
   UNREFERENCED_PARAMETER(reason_specific_data);
   UNREFERENCED_PARAMETER(reason_specific_data_length);
-  if (!dump_header_refreshed_flag) {
-    NTSTATUS status;
-    status = KeInitializeCrashDumpHeader(DUMP_TYPE_FULL, 0, dump_header + DUMP_HEADER_PREFIX_SIZE, dump_header_size, &dump_header_size);
-    /* copy bug check code in? */
-    dump_header_refreshed_flag = TRUE;
+  
+  if (dump_header && reason == KbCallbackDumpIo) {
+    PKBUGCHECK_DUMP_IO dump_io = reason_specific_data;
+    if (dump_io->Type == KbDumpIoHeader ) {
+      if (dump_io->Offset != -1) {
+        dump_current_offset = dump_io->Offset;
+      }
+      XN_ASSERT(dump_current_offset + dump_io->BufferLength <= dump_header_size);
+      RtlCopyMemory(dump_header + DUMP_HEADER_PREFIX_SIZE + dump_current_offset, dump_io->Buffer, dump_io->BufferLength);
+      dump_current_offset += dump_io->BufferLength;
+    } else if (dump_io->Type == KbDumpIoComplete) {
+      dump_current_offset = 0;
+    }
   }
 }
 #endif
