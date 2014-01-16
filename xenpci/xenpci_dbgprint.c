@@ -34,6 +34,7 @@ XenPci_DebugPrintV(PCHAR format, va_list args) {
   status = RtlStringCbVPrintfA(buf, ARRAY_SIZE(buf), format, args);  
   if (status != STATUS_SUCCESS)
     return status;
+  DbgPrint("%s", buf);
   KeRaiseIrql(HIGH_LEVEL, &old_irql);
   /* make sure that each print gets to complete in its entirety */
   while(InterlockedCompareExchange(&debug_print_lock, 1, 0) == 1)
