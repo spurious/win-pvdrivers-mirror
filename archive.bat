@@ -21,6 +21,6 @@ SET SYMFILES=%SYMFILES% xenvbd_storport\%BUILDDIR%\xen*.sys xenvbd_storport\%BUI
 
 :symfiles_done
 
-%SEVENZIP% a -y symbols_%BUILD_ALT_DIR%_%GPLPV_VERSION%.zip %SYMFILES%
+%SEVENZIP% a -y symbols_%BUILD_ALT_DIR%_%EJBPV_VERSION%.zip %SYMFILES%
 
 :end

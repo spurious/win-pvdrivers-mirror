@@ -6,11 +6,11 @@
     <?define ARCHDIR = amd64 ?>
   <?endif ?>
 
-  <Product Name='GPL PV Drivers for Windows' Id='*'
+  <Product Name='EJB PV Drivers for Windows' Id='*'
     UpgradeCode='4EDE5DEC-3208-4a1e-8E52-DAC44F7D7062'
-    Language='1033' Codepage='1252' Version='$(env.GPLPV_VERSION)' Manufacturer='James Harper'>
+    Language='1033' Codepage='1252' Version='$(env.EJBPV_VERSION)' Manufacturer='James Harper'>
 
-    <Package Id='*' Keywords='Installer' Description="GPL PV Drivers for Windows"
+    <Package Id='*' Keywords='Installer' Description="EJB PV Drivers for Windows"
       Comments='no comment' Manufacturer='James Harper'
       InstallerVersion='100' Languages='1033' Compressed='yes' SummaryCodepage='1252' />
 
@@ -21,7 +21,7 @@
       <UIRef Id="WixUI_ErrorProgressText" />
     </UI>
     
-    <Media Id='1' Cabinet='gplpv.cab' EmbedCab='yes' />
+    <Media Id='1' Cabinet='ejbpv.cab' EmbedCab='yes' />
 
     <?if $(env.DDK_TARGET_OS) != Win2K ?>
     <Binary Id='waitfordevices.vbs' SourceFile='waitnopendinginstallevents\waitfordevices.vbs'/>

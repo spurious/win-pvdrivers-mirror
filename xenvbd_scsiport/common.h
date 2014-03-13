@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
-#define XENVBD_CONTROL_SIG         "XENGPLPV"
+#define XENVBD_CONTROL_SIG         "XENEJBPV"
 #define XENVBD_CONTROL_START       0
 #define XENVBD_CONTROL_STOP        1
 #define XENVBD_CONTROL_EVENT       2

@@ -27,54 +27,46 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#if !defined(_XENVBD_H_)
-#define _XENVBD_H_
+#ifndef EJBPV_VERSION_H
+#define EJBPV_VERSION_H
 
-#define __DRIVER_NAME "XenVbdFilter"
+#define EXPAND(x) STRINGIFY(x)
+#define STRINGIFY(x) #x
 
-#include <ntddk.h>
-#include <wdf.h>
-#if (NTDDI_VERSION < NTDDI_WINXP) /* srb.h causes warnings under 2K for some reason */
-#pragma warning(disable:4201) /* nameless struct/union */
-#pragma warning(disable:4214) /* bit field types other than int */
-#endif
-#include <srb.h>
-#include <ntstrsafe.h>
-#include "xen_windows.h"
-#include <xen_public.h>
-#include <io/protocols.h>
-#include <memory.h>
-#include <event_channel.h>
-#include <hvm/params.h>
-#include <hvm/hvm_op.h>
-#include <io/ring.h>
-#include <io/blkif.h>
-#include <io/xenbus.h>
-
-#pragma warning(disable: 4127)
-
-#if defined(__x86_64__)
-  #define ABI_PROTOCOL "x86_64-abi"
+#define VER_FILETYPE                VFT_DRV
+#define VER_FILESUBTYPE             VFT2_DRV_SYSTEM
+#ifdef DEBUG
+  #define VER_FILEDESCRIPTION_STR     EJBPV_DRIVER_DESCRIPTION 
 #else
-  #define ABI_PROTOCOL "x86_32-abi"
+  #define VER_FILEDESCRIPTION_STR     EJBPV_DRIVER_DESCRIPTION " (Checked Build)"
+#endif
+#define VER_INTERNALNAME_STR        EJBPV_DRIVER_FILENAME 
+#define VER_ORIGINALFILENAME_STR    EJBPV_DRIVER_FILENAME 
+
+#ifdef VERSION_MAJOR
+  #ifdef BUILD_NUMBER
+    #define VER_FILEVERSION             VERSION_MAJOR,VERSION_MINOR,REVISION,BUILD_NUMBER
+    #define VER_FILEVERSION_STR         "EJBPV " EXPAND(VERSION_MAJOR) "." EXPAND(VERSION_MINOR) "." EXPAND(REVISION) "." EXPAND(BUILD_NUMBER)
+  #else
+    #define VER_FILEVERSION             VERSION_MAJOR,VERSION_MINOR,REVISION,0
+    #define VER_FILEVERSION_STR         "EJBPV " EXPAND(VERSION_MAJOR) "." EXPAND(VERSION_MINOR) "." EXPAND(REVISION)
+  #endif
+#else
+  #define VER_FILEVERSION             0,0,0,0
+  #define VER_FILEVERSION_STR         "EJBPV Unversioned"
 #endif
 
-#include "../xenvbd_common/common.h"
+#undef VER_PRODUCTVERSION
+#define VER_PRODUCTVERSION          VER_FILEVERSION
+#undef VER_PRODUCTVERSION_STR
+#define VER_PRODUCTVERSION_STR      VER_FILEVERSION_STR
+#define VER_LEGALCOPYRIGHT_STR      "Copyright (C) 2014 James Harper" 
 
-#include "../xenvbd_scsiport/common.h"
-
-typedef struct {
-  WDFDEVICE wdf_device;
-  WDFIOTARGET wdf_target;
-  WDFDPC dpc;
-  WDFQUEUE io_queue;
-  BOOLEAN hibernate_flag;
-  /* event state 0 = no event outstanding, 1 = event outstanding, 2 = need event */
-  LONG event_state;
-  
-  XENVBD_DEVICE_DATA xvdd;
-} XENVBD_FILTER_DATA, *PXENVBD_FILTER_DATA;
-
-WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(XENVBD_FILTER_DATA, GetXvfd)
+#ifdef VER_COMPANYNAME_STR
+#undef VER_COMPANYNAME_STR
+#define VER_COMPANYNAME_STR         "James Harper"
+#endif
+#undef VER_PRODUCTNAME_STR
+#define VER_PRODUCTNAME_STR         "PV Drivers for Windows"
 
 #endif
