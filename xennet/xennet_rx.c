@@ -1161,13 +1161,22 @@ XenNet_RxInit(xennet_info_t *xi) {
   // this stuff needs to be done once only...
   KeInitializeSpinLock(&xi->rx_lock);
   KeInitializeEvent(&xi->rx_idle_event, SynchronizationEvent, FALSE);
+  #if NTDDI_VERSION < NTDDI_VISTA
+  FUNCTION_MSG("NdisSystemProcessorCount = %d\n", NdisSystemProcessorCount());
   xi->rxpi = ExAllocatePoolWithTagPriority(NonPagedPool, sizeof(packet_info_t) * NdisSystemProcessorCount(), XENNET_POOL_TAG, NormalPoolPriority);
+  #else
+  FUNCTION_MSG("KeQueryActiveProcessorCount = %d\n", KeQueryActiveProcessorCount(NULL));
+  xi->rxpi = ExAllocatePoolWithTagPriority(NonPagedPool, sizeof(packet_info_t) * KeQueryActiveProcessorCount(NULL), XENNET_POOL_TAG, NormalPoolPriority);
+  #endif
   if (!xi->rxpi) {
     FUNCTION_MSG("ExAllocatePoolWithTagPriority failed\n");
     return FALSE;
   }
+  #if NTDDI_VERSION < NTDDI_VISTA
   NdisZeroMemory(xi->rxpi, sizeof(packet_info_t) * NdisSystemProcessorCount());
-
+  #else
+  NdisZeroMemory(xi->rxpi, sizeof(packet_info_t) * KeQueryActiveProcessorCount(NULL));
+  #endif
   ret = stack_new(&xi->rx_pb_stack, NET_RX_RING_SIZE * 4);
   if (!ret) {
     FUNCTION_MSG("Failed to allocate rx_pb_stack\n");
