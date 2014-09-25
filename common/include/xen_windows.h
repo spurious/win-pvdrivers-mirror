@@ -292,7 +292,7 @@ XnPrintDump();
 #define XN_ASSERT(expr) \
 if (!(expr)) { \
   XnDebugPrint("ASSERT(%s) %s:%d\n", #expr, __FILE__, __LINE__); \
-  ASSERT(expr); \
+  NT_ASSERT(expr); \
 }
 #else
 #define XN_ASSERT(expr)
