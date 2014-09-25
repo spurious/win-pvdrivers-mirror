@@ -360,7 +360,7 @@ XenVbd_HwScsiAdapterControl(PVOID DeviceExtension, SCSI_ADAPTER_CONTROL_TYPE Con
       break;
     }
     XN_ASSERT(IsListEmpty(&xvdd->srb_list));
-    XN_ASSERT(xvdd->shadow_free == SHADOW_ENTRIES);
+    //XN_ASSERT(xvdd->shadow_free == SHADOW_ENTRIES);
     break;
   case ScsiRestartAdapter:
     FUNCTION_MSG("ScsiRestartAdapter\n");
