@@ -30,13 +30,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "xennet.h"
 
 static __inline shared_buffer_t *
-get_pb_from_freelist(struct xennet_info *xi)
-{
+get_pb_from_freelist(struct xennet_info *xi) {
   shared_buffer_t *pb;
   PVOID ptr_ref;
 
-  if (stack_pop(xi->rx_pb_stack, &ptr_ref))
-  {
+  if (stack_pop(xi->rx_pb_stack, &ptr_ref)) {
     pb = ptr_ref;
     pb->ref_count = 1;
     InterlockedDecrement(&xi->rx_pb_free);
@@ -51,22 +49,19 @@ get_pb_from_freelist(struct xennet_info *xi)
   if (!pb)
     return NULL;
   pb->virtual = ExAllocatePoolWithTagPriority(NonPagedPool, PAGE_SIZE, XENNET_POOL_TAG, LowPoolPriority);
-  if (!pb->virtual)
-  {
+  if (!pb->virtual) {
     ExFreePoolWithTag(pb, XENNET_POOL_TAG);
     return NULL;
   }
   pb->mdl = IoAllocateMdl(pb->virtual, PAGE_SIZE, FALSE, FALSE, NULL);
-  if (!pb->mdl)
-  {
+  if (!pb->mdl) {
     ExFreePoolWithTag(pb->virtual, XENNET_POOL_TAG);
     ExFreePoolWithTag(pb, XENNET_POOL_TAG);
     return NULL;
   }
   pb->gref = (grant_ref_t)XnGrantAccess(xi->handle,
             (ULONG)(MmGetPhysicalAddress(pb->virtual).QuadPart >> PAGE_SHIFT), FALSE, INVALID_GRANT_REF, (ULONG)'XNRX');
-  if (pb->gref == INVALID_GRANT_REF)
-  {
+  if (pb->gref == INVALID_GRANT_REF) {
     IoFreeMdl(pb->mdl);
     ExFreePoolWithTag(pb->virtual, XENNET_POOL_TAG);
     ExFreePoolWithTag(pb, XENNET_POOL_TAG);
@@ -78,23 +73,19 @@ get_pb_from_freelist(struct xennet_info *xi)
 }
 
 static __inline VOID
-ref_pb(struct xennet_info *xi, shared_buffer_t *pb)
-{
+ref_pb(struct xennet_info *xi, shared_buffer_t *pb) {
   UNREFERENCED_PARAMETER(xi);
   InterlockedIncrement(&pb->ref_count);
 }
 
 static __inline VOID
-put_pb_on_freelist(struct xennet_info *xi, shared_buffer_t *pb)
-{
+put_pb_on_freelist(struct xennet_info *xi, shared_buffer_t *pb) {
   int ref = InterlockedDecrement(&pb->ref_count);
   XN_ASSERT(ref >= 0);
-  if (ref == 0)
-  {
+  if (ref == 0) {
     //NdisAdjustBufferLength(pb->buffer, PAGE_SIZE);
     //NDIS_BUFFER_LINKAGE(pb->buffer) = NULL;
-    if (xi->rx_pb_free > RX_MAX_PB_FREELIST)
-    {
+    if (xi->rx_pb_free > RX_MAX_PB_FREELIST) {
       XnEndAccess(xi->handle, pb->gref, FALSE, (ULONG)'XNRX');
       IoFreeMdl(pb->mdl);
       ExFreePoolWithTag(pb->virtual, XENNET_POOL_TAG);
@@ -110,13 +101,11 @@ put_pb_on_freelist(struct xennet_info *xi, shared_buffer_t *pb)
 }
 
 static __inline shared_buffer_t *
-get_hb_from_freelist(struct xennet_info *xi)
-{
+get_hb_from_freelist(struct xennet_info *xi) {
   shared_buffer_t *hb;
   PVOID ptr_ref;
 
-  if (stack_pop(xi->rx_hb_stack, &ptr_ref))
-  {
+  if (stack_pop(xi->rx_hb_stack, &ptr_ref)) {
     hb = ptr_ref;
     InterlockedDecrement(&xi->rx_hb_free);
     return hb;
@@ -140,8 +129,7 @@ get_hb_from_freelist(struct xennet_info *xi)
 }
 
 static __inline VOID
-put_hb_on_freelist(struct xennet_info *xi, shared_buffer_t *hb)
-{
+put_hb_on_freelist(struct xennet_info *xi, shared_buffer_t *hb) {
   XN_ASSERT(xi);
   hb->mdl->ByteCount = sizeof(shared_buffer_t) + MAX_ETH_HEADER_LENGTH + MAX_LOOKAHEAD_LENGTH;
   hb->mdl->Next = NULL;
@@ -152,8 +140,7 @@ put_hb_on_freelist(struct xennet_info *xi, shared_buffer_t *hb)
 
 // Called at DISPATCH_LEVEL with rx lock held
 static VOID
-XenNet_FillRing(struct xennet_info *xi)
-{
+XenNet_FillRing(struct xennet_info *xi) {
   unsigned short id;
   shared_buffer_t *page_buf;
   ULONG i, notify;
@@ -645,8 +632,7 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
 }
 
 static VOID
-XenNet_MakePackets(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi)
-{
+XenNet_MakePackets(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
   UCHAR tcp_flags;
   shared_buffer_t *page_buf;
 
@@ -772,8 +758,7 @@ XenNet_ReturnPacket(NDIS_HANDLE adapter_context, PNDIS_PACKET packet) {
 /* called at <= DISPATCH_LEVEL */
 /* it's okay for return packet to be called while resume_state != RUNNING as the packet will simply be added back to the freelist, the grants will be fixed later */
 VOID
-XenNet_ReturnNetBufferLists(NDIS_HANDLE adapter_context, PNET_BUFFER_LIST curr_nbl, ULONG return_flags)
-{
+XenNet_ReturnNetBufferLists(NDIS_HANDLE adapter_context, PNET_BUFFER_LIST curr_nbl, ULONG return_flags) {
   struct xennet_info *xi = adapter_context;
   UNREFERENCED_PARAMETER(return_flags);
 
@@ -782,15 +767,13 @@ XenNet_ReturnNetBufferLists(NDIS_HANDLE adapter_context, PNET_BUFFER_LIST curr_n
   //KdPrint((__DRIVER_NAME "     page_buf = %p\n", page_buf));
 
   XN_ASSERT(xi);
-  while (curr_nbl)
-  {
+  while (curr_nbl) {
     PNET_BUFFER_LIST next_nbl;
     PNET_BUFFER curr_nb;
     
     next_nbl = NET_BUFFER_LIST_NEXT_NBL(curr_nbl);
     curr_nb = NET_BUFFER_LIST_FIRST_NB(curr_nbl);
-    while (curr_nb)
-    {
+    while (curr_nb) {
       PNET_BUFFER next_nb;
       PMDL curr_mdl;
       shared_buffer_t *page_buf;
@@ -798,24 +781,19 @@ XenNet_ReturnNetBufferLists(NDIS_HANDLE adapter_context, PNET_BUFFER_LIST curr_n
       next_nb = NET_BUFFER_NEXT_NB(curr_nb);
       curr_mdl = NET_BUFFER_FIRST_MDL(curr_nb);
       page_buf = NB_FIRST_PB(curr_nb);
-      while (curr_mdl)
-      {
+      while (curr_mdl) {
         shared_buffer_t *next_buf;
         PMDL next_mdl;
         
         XN_ASSERT(page_buf); /* make sure that there is a pb to match this mdl */
         next_mdl = curr_mdl->Next;
         next_buf = page_buf->next;
-        if (!page_buf->virtual)
-        {
+        if (!page_buf->virtual) {
           /* this is a hb not a pb because virtual is NULL (virtual is just the memory after the hb */
           put_hb_on_freelist(xi, (shared_buffer_t *)MmGetMdlVirtualAddress(curr_mdl) - 1);
-        }
-        else
-        {
+        } else {
           //KdPrint((__DRIVER_NAME "     returning page_buf %p with id %d\n", page_buf, page_buf->id));
-          if (curr_mdl != page_buf->mdl)
-          {
+          if (curr_mdl != page_buf->mdl) {
             //KdPrint((__DRIVER_NAME "     curr_mdl = %p, page_buf->mdl = %p\n", curr_mdl, page_buf->mdl));
             IoFreeMdl(curr_mdl);
           }
@@ -851,8 +829,7 @@ under high rx load. The DPC is immediately re-scheduled */
 
 // Called at DISPATCH_LEVEL
 BOOLEAN
-XenNet_RxBufferCheck(struct xennet_info *xi)
-{
+XenNet_RxBufferCheck(struct xennet_info *xi) {
   RING_IDX cons, prod;
   ULONG packet_count = 0;
   ULONG packet_data = 0;
