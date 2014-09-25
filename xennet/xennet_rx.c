@@ -87,7 +87,9 @@ ref_pb(struct xennet_info *xi, shared_buffer_t *pb)
 static __inline VOID
 put_pb_on_freelist(struct xennet_info *xi, shared_buffer_t *pb)
 {
-  if (InterlockedDecrement(&pb->ref_count) == 0)
+  int ref = InterlockedDecrement(&pb->ref_count);
+  XN_ASSERT(ref >= 0);
+  if (ref == 0)
   {
     //NdisAdjustBufferLength(pb->buffer, PAGE_SIZE);
     //NDIS_BUFFER_LINKAGE(pb->buffer) = NULL;
@@ -390,12 +392,17 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
     header_buf = NULL;
     /* get all the packet into the header */
     XenNet_BuildHeader(pi, pi->first_mdl_virtual, PAGE_SIZE);
+
+    /* have to create a partial mdl over the pb MDL as the pb mdl has a Next which breaks things */
+    curr_mdl = IoAllocateMdl(pi->first_mdl_virtual, pi->total_length, FALSE, FALSE, NULL);
+    XN_ASSERT(curr_mdl);
+    IoBuildPartialMdl(pi->first_mdl, curr_mdl, pi->first_mdl_virtual, pi->total_length);
     #if NTDDI_VERSION < NTDDI_VISTA
-    NdisChainBufferAtBack(packet, pi->first_mdl);
+    NdisChainBufferAtBack(packet, curr_mdl);
     PACKET_FIRST_PB(packet) = pi->first_pb;
     #else
-    NET_BUFFER_FIRST_MDL(packet) = pi->first_mdl;
-    NET_BUFFER_CURRENT_MDL(packet) = pi->first_mdl;
+    NET_BUFFER_FIRST_MDL(packet) = curr_mdl;
+    NET_BUFFER_CURRENT_MDL(packet) = curr_mdl;
     NET_BUFFER_CURRENT_MDL_OFFSET(packet) = 0;
     NET_BUFFER_DATA_OFFSET(packet) = 0;
     NET_BUFFER_DATA_LENGTH(packet) = pi->total_length;
@@ -429,6 +436,7 @@ XenNet_MakePacket(struct xennet_info *xi, rx_context_t *rc, packet_info_t *pi) {
     XN_ASSERT(pi->header_length <= MAX_ETH_HEADER_LENGTH + MAX_LOOKAHEAD_LENGTH);
     header_buf->mdl->ByteCount = pi->header_length;
     mdl_head = mdl_tail = curr_mdl = header_buf->mdl;
+    XN_ASSERT(!header_buf->mdl->Next);
     #if NTDDI_VERSION < NTDDI_VISTA
     PACKET_FIRST_PB(packet) = header_buf;
     header_buf->next = pi->curr_pb;
