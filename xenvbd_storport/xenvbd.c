@@ -383,7 +383,7 @@ XenVbd_HwStorAdapterControl(PVOID DeviceExtension, SCSI_ADAPTER_CONTROL_TYPE Con
       break;
     }
     XN_ASSERT(IsListEmpty(&xvdd->srb_list));
-    XN_ASSERT(xvdd->shadow_free == SHADOW_ENTRIES);
+    // XN_ASSERT(xvdd->shadow_free == SHADOW_ENTRIES); /* this assert failes to compile because it expands to a too long string */
     if (xvdd->power_action != StorPowerActionHibernate) {
       /* if hibernate then device_state will be set on our behalf in the hibernate FindAdapter */
       xvdd->device_state = DEVICE_STATE_DISCONNECTED;
