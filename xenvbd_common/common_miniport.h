@@ -274,6 +274,7 @@ XenVbd_HandleEvent(PXENVBD_DEVICE_DATA xvdd) {
       more_to_do = RING_HAS_UNCONSUMED_RESPONSES(&xvdd->ring);
       if (!more_to_do) {
         xvdd->ring.sring->rsp_event = i + max(1, (SHADOW_ENTRIES - xvdd->shadow_free) / 2);
+        KeMemoryBarrier();
         more_to_do = RING_HAS_UNCONSUMED_RESPONSES(&xvdd->ring);
       }
     }
